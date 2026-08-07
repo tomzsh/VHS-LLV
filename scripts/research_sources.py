@@ -1,7 +1,7 @@
 """Data sources for bug bounty hacktivity / writeups.
 
-Ported into vhs from https://github.com/The-XSS-Rat/BountySkiller (sources.py)
-by Tomz. Original work (c) The-XSS-Rat, published publicly on GitHub.
+Ported into vhs from https://github.com/The-XSS-Rat/BountySkiller (sources.py).
+Original work (c) The-XSS-Rat, published publicly on GitHub.
 Used as an optional vhs research stage (P1/P2).
 
 Every source exposes fetch(months, cutoff, opts, progress) -> list[dict] using

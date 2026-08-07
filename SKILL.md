@@ -2,7 +2,7 @@
 name: vhs
 description: Authorized pentest/bug-bounty/code-audit, P0-P6 gates.
 version: 2.1.3
-author: Gustom
+author: tomzsh
 platforms: [linux]
 metadata:
   hermes:
@@ -415,14 +415,14 @@ Non-obvious behaviors that bite on resume or reuse. Full detail in each script.
 - `check_tools.py` — profile-aware dependency inspection.
 - `scrapling_crawl.py` + `scrapling_crawl.sh` — stealth fetch + link extraction
   (handles 403/Cloudflare pages). Launcher clears `PYTHONPATH` and runs under the
-  scrapling venv (`/home/tomz/tools/scrapling/venv`); override with
+  scrapling venv (`~/tools/scrapling/venv`); override with
   `VHS_SCRAPLING_HOME` / `VHS_SCRAPLING_PYTHON`.
 - `wafw00f.sh` — WAF fingerprinting via the wafw00f venv
-  (`/home/tomz/tools/wafw00f`); override with `VHS_WAFW00F_HOME`. Detects the
+  (`~/tools/wafw00f`); override with `VHS_WAFW00F_HOME`. Detects the
   WAF before choosing bypass/rate-limit strategies.
 - `sqlmap.sh` / `paramspider.sh` / `nikto.sh` — venv/source launchers for SQLi
   automation, parameter discovery, and server misconfig scanning. Homes:
-  `/home/tomz/tools/<sqlmap|paramspider|nikto>`; override with
+  `~/tools/<sqlmap|paramspider|nikto>`; override with
   `VHS_SQLMAP_HOME` / `VHS_PARAMSPIDER_HOME` / `VHS_NIKTO_HOME`. All clear
   `PYTHONPATH` (PEP 668-safe pattern).
 - `crawl4ai_crawl.py` + `crawl4ai_crawl.sh` — headless-Chromium JS crawl via crawl4ai.
@@ -473,7 +473,7 @@ is merged into `urls_all.txt` and passes through the same scope guard as katana.
 
 - **Scrapling** (`scripts/scrapling_crawl.sh --input live_urls.txt`): stealth
   fetch of anti-bot/JS pages. Runs through the bundled venv launcher
-  (`/home/tomz/tools/scrapling/venv`).
+  (`~/tools/scrapling/venv`).
 - **crawl4ai** (`scripts/crawl4ai_crawl.sh --input live_urls.txt`): JS-rendered link
   discovery. Configure the interpreter with `VHS_CRAWL4AI_PYTHON` or its venv
   directory with `VHS_CRAWL4AI_HOME`; the legacy local path is only a fallback.

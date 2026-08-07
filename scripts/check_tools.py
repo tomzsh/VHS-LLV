@@ -82,7 +82,7 @@ def scrapling_ok() -> tuple[bool, str]:
     if override:
         venv_py = Path(override).expanduser()
     else:
-        venv_home = os.environ.get("VHS_SCRAPLING_HOME", "/home/tomz/tools/scrapling/venv")
+        venv_home = os.environ.get("VHS_SCRAPLING_HOME", "~/tools/scrapling/venv")
         venv_py = Path(venv_home).expanduser() / "bin" / "python"
     if not venv_py.exists():
         return False, f"venv python missing ({venv_py})"
@@ -105,7 +105,7 @@ def crawl4ai_ok() -> tuple[bool, str]:
     if override:
         venv_py = Path(override).expanduser()
     else:
-        venv_home = os.environ.get("VHS_CRAWL4AI_HOME", "/home/tomz/tools/crawl4ai")
+        venv_home = os.environ.get("VHS_CRAWL4AI_HOME", "~/tools/crawl4ai")
         venv_py = Path(venv_home).expanduser() / "bin" / "python"
     if not venv_py.exists():
         return False, f"venv python missing ({venv_py})"
@@ -125,7 +125,7 @@ def wafw00f_ok() -> tuple[bool, str]:
     if not launcher.exists():
         return False, "launcher missing"
     override = os.environ.get("VHS_WAFW00F_HOME")
-    venv_home = Path(override).expanduser() if override else Path("/home/tomz/tools/wafw00f")
+    venv_home = Path(override).expanduser() if override else Path("~/tools/wafw00f")
     binary = venv_home / "bin" / "wafw00f"
     if not binary.exists():
         return False, f"venv binary missing ({binary})"
@@ -162,16 +162,16 @@ def venv_bin_ok(name: str, default_home: str, env_key: str, probe_arg: str = "--
 
 
 def sqlmap_ok() -> tuple[bool, str]:
-    return venv_bin_ok("sqlmap", "/home/tomz/tools/sqlmap", "VHS_SQLMAP_HOME")
+    return venv_bin_ok("sqlmap", "~/tools/sqlmap", "VHS_SQLMAP_HOME")
 
 
 def paramspider_ok() -> tuple[bool, str]:
-    return venv_bin_ok("paramspider", "/home/tomz/tools/paramspider", "VHS_PARAMSPIDER_HOME", "-h")
+    return venv_bin_ok("paramspider", "~/tools/paramspider", "VHS_PARAMSPIDER_HOME", "-h")
 
 
 def nikto_ok() -> tuple[bool, str]:
     override = os.environ.get("VHS_NIKTO_HOME")
-    home = Path(override).expanduser() if override else Path("/home/tomz/tools/nikto")
+    home = Path(override).expanduser() if override else Path("~/tools/nikto")
     program = home / "program" / "nikto.pl"
     if not program.exists():
         return False, f"nikto.pl missing ({program})"
@@ -179,7 +179,7 @@ def nikto_ok() -> tuple[bool, str]:
         proc = subprocess.run(
             ["perl", str(program), "-Version"],
             capture_output=True, timeout=30, check=False,
-            env={**os.environ, "PERL5LIB": os.environ.get("PERL5LIB", "") + ":/home/tomz/perl5/lib/perl5"},
+            env={**os.environ, "PERL5LIB": os.environ.get("PERL5LIB", "") + ":" + os.path.expanduser("~/perl5/lib/perl5")},
         )
     except (OSError, subprocess.TimeoutExpired):
         return False, "nikto probe failed"

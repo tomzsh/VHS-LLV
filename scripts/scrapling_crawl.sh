@@ -4,7 +4,7 @@
 # Override with VHS_SCRAPLING_HOME (dir containing bin/python) or
 # VHS_SCRAPLING_PYTHON (explicit interpreter path).
 set -euo pipefail
-S="${VHS_SCRAPLING_HOME:-/home/tomz/tools/scrapling/venv}"
+S="${VHS_SCRAPLING_HOME:-${HOME}/tools/scrapling/venv}"
 PY="${VHS_SCRAPLING_PYTHON:-$S/bin/python}"
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 

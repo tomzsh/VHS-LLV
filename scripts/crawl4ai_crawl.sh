@@ -3,7 +3,7 @@
 # crawl4ai venv. Override the legacy default with VHS_CRAWL4AI_PYTHON or
 # VHS_CRAWL4AI_HOME.
 set -euo pipefail
-C4="${VHS_CRAWL4AI_HOME:-/home/tomz/tools/crawl4ai}"
+C4="${VHS_CRAWL4AI_HOME:-${HOME}/tools/crawl4ai}"
 PY="${VHS_CRAWL4AI_PYTHON:-$C4/bin/python}"
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 

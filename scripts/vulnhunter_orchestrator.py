@@ -97,7 +97,7 @@ def crawl4ai_launcher_available(script: Path) -> bool:
     if override:
         interpreter = Path(override).expanduser()
     else:
-        home = os.environ.get("VHS_CRAWL4AI_HOME", "/home/tomz/tools/crawl4ai")
+        home = os.environ.get("VHS_CRAWL4AI_HOME", "~/tools/crawl4ai")
         interpreter = Path(home).expanduser() / "bin" / "python"
     return script.exists() and os.access(script, os.X_OK) and interpreter.is_file() and os.access(interpreter, os.X_OK)
 

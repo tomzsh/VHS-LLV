@@ -39,8 +39,8 @@ Load all modules that match the architecture:
 - `module-web-api-identity.md`: browsers, mobile backends, REST, GraphQL, WebSocket, auth, SSO, sessions, tenants, admin/support tools.
 - `module-cloud-ai-supply-chain.md`: cloud, serverless, storage, queues, CI/CD, dependencies, logs, AI/LLM, RAG, tools, agents.
 - `module-web3-fintech.md`: wallets, signing, contracts, relayers, bridges, DeFi, payments, custodial flows, balances, ledgers, KYC.
-- **`module-business-logic.md`**: payment manipulation, race condition, ATO, JWT, OIDC, SSRF, upload, rate limit bypass. — Selalu load di MODE:CRITICAL.
-- **`module-ai-mcp.md`**: MCP server OAuth, dynamic client registration, CLI installer supply chain, AI plugin manifests, QR login, MCP tool enumeration. — Load kalau target punya MCP/CLI/AI integration.
+- **`module-business-logic.md`**: payment manipulation, race condition, ATO, JWT, OIDC, SSRF, upload, rate limit bypass. — Always load in MODE:CRITICAL.
+- **`module-ai-mcp.md`**: MCP server OAuth, dynamic client registration, CLI installer supply chain, AI plugin manifests, QR login, MCP tool enumeration. — Load when the target has MCP/CLI/AI integration.
 
 ## Search hints
 

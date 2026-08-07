@@ -1,7 +1,7 @@
 # OIDC Session Auto-Refresh (Keycloak pattern)
 
-For targets using Keycloak/OIDC (Bitso, nvio, many fintech), obtain a **self-refreshing
-access token** without asking the operator to re-paste JWT every ~5 minutes.
+For targets using Keycloak/OIDC (common in fintech), obtain a **self-refreshing
+access token** without asking the operator to re-paste a JWT every ~5 minutes.
 
 ## When to use
 
@@ -13,7 +13,7 @@ access token** without asking the operator to re-paste JWT every ~5 minutes.
 ## Prerequisites (from JS bundle / OIDC discovery)
 
 - realm (e.g. `web`)
-- client_id (e.g. `bitso-web-client`)
+- client_id (e.g. `<app>-web-client`)
 - redirect_uri registered by the client (e.g. `https://<host>/wallet`)
 - auth/token endpoints: `<origin>/auth/realms/<realm>/protocol/openid-connect/{auth,token}`
 
@@ -23,14 +23,14 @@ access token** without asking the operator to re-paste JWT every ~5 minutes.
    at `Path=/auth/realms/<realm>/`, NOT `/`. A jar with the wrong path makes
    Keycloak reset the session (`KEYCLOAK_SESSION=;Max-Age=0` → 200 login page).
    ```
-   .bitso.com TRUE /auth/realms/web/ TRUE 1848764026 AUTH_SESSION_ID <value>
-   .bitso.com TRUE /auth/realms/web/ TRUE 0 KEYCLOAK_SESSION <value>
-   .bitso.com TRUE /auth/realms/web/ TRUE 1848764026 KEYCLOAK_IDENTITY <jwt>
+   .<target-host> TRUE /auth/realms/<realm>/ TRUE 1848764026 AUTH_SESSION_ID <value>
+   .<target-host> TRUE /auth/realms/<realm>/ TRUE 0 KEYCLOAK_SESSION <value>
+   .<target-host> TRUE /auth/realms/<realm>/ TRUE 1848764026 KEYCLOAK_IDENTITY <jwt>
    ```
 
 2. **PKCE S256** — Keycloak requires `code_challenge_method=S256`; missing → 302
    `error=invalid_request Missing parameter: code_challenge_method`.
-   - verifier: `bso-pkce-$(head -c40 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=')`
+   - verifier: `pkce-$(head -c40 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=')`
      — MUST be ≥43 chars (prefix + 40-byte base64). A 41-char verifier is rejected:
      `PKCE verification failed: Invalid code verifier`.
    - challenge: `printf '%s' "$VERIFIER" | openssl dgst -sha256 -binary | base64 | tr '+/' '-_' | tr -d '='`
@@ -45,19 +45,21 @@ access token** without asking the operator to re-paste JWT every ~5 minutes.
    → JSON `access_token` (+ `refresh_token`).
 
 5. **Save + use**: write `access_token` to a file (e.g. `runs/auto-token.txt`),
-   `Authorization: Bearer $(cat file)` on API calls.
+   `Authorization: Bearer $(cat <token file>)` on API calls.
 
 ## Pitfalls
 
 - **Never re-type long JWTs by hand** — the agent corrupts them. Always have the
   operator save to a file, or obtain via the OIDC flow above.
-- ISP DNS-poisoned host (block.myrepublic.co.id): add `--resolve host:443:<real-ip>`
-  (real IP via `dig @1.1.1.1 A host`).
+- On a DNS-poisoned/blocked host, add `--resolve host:443:<real-ip>`
+  (resolve the real IP via `dig @1.1.1.1 A host`).
 - Cookies set by Keycloak include `__cf_bm`/CF challenge — if the jar lacks them,
   Cloudflare may block; the authorize step usually re-sets what's needed.
 - `session_state` in the redirect URL is normal; not a token.
 
 ## Reference implementation
 
-`/home/tomz/Documents/Bug Bounty/Bitso/runs/bitso-token.sh` — full working script
-(OIDC auth-code + PKCE, saves auto-token.txt, `--probe` flag for quick PII probes).
+Write a small `token.sh` under the engagement's `runs/` directory: OIDC
+auth-code + PKCE flow that saves `auto-token.txt`, with an optional `--probe`
+flag for quick read-only checks. Keep it inside the engagement workspace, never
+in a shared or committed location.

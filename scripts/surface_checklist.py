@@ -109,7 +109,7 @@ def classify_surface(surface_row: dict) -> str:
     if any(k in blob for k in ("service", "api", "rest", "graphql", "ws", "websocket", "json", "scim", "bridge", "backend")):
         return "api"
     # mobile only when explicitly a mobile asset (app store id / com.* bundle / android / ios)
-    if any(k in blob for k in ("android", "ios", "google_play", "apple_store", "com.whatnot", "mobile app", "bundle")):
+    if any(k in blob for k in ("android", "ios", "google_play", "apple_store", "com.", "mobile app", "bundle")):
         return "mobile"
     if any(k in blob for k in ("s3", "bucket", "cloud", "lambda", "serverless", "storage")):
         return "cloud"
