@@ -15,6 +15,10 @@
     "required_any": [],
     "optional": ["nuclei", "dalfox", "interactsh-client"]
   },
+  "mobile": {
+    "required_any": [],
+    "optional": ["jadx", "apktool", "apkeep", "adb", "aapt"]
+  },
   "report": {
     "required_any": ["python3"],
     "optional": ["jq", "curl"]

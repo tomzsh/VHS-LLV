@@ -14,8 +14,8 @@ CONFIG = json.loads((Path(__file__).resolve().parents[1] / "config" / "tools.jso
 PROFILE_AGENTS = {
     "plan-only": ("report",),
     "passive-osint": ("recon", "crawl", "report"),
-    "active-safe": ("recon", "crawl", "report"),
-    "scanner-safe": ("recon", "crawl", "discovery", "scan", "report"),
+    "active-safe": ("recon", "crawl", "mobile", "report"),
+    "scanner-safe": ("recon", "crawl", "discovery", "scan", "mobile", "report"),
 }
 PROBE = {
     "subfinder": ("-version", False),
@@ -39,6 +39,11 @@ PROBE = {
     "jq": ("--version", False),
     "curl": ("--version", False),
     "python3": ("--version", False),
+    "jadx": ("--version", False),
+    "apktool": ("--version", False),
+    "apkeep": ("--version", False),
+    "adb": ("version", False),
+    "aapt": ("version", True),
 }
 
 

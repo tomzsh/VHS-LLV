@@ -1,7 +1,7 @@
 ---
 name: vhs
 description: Authorized pentest/bug-bounty/code-audit, P0-P6 gates.
-version: 2.1.3
+version: 2.2.0
 author: tomzsh
 platforms: [linux]
 metadata:
@@ -247,6 +247,7 @@ It cannot authorize an asset absent from `engagement.json`.
 | P1 | model actors, boundaries, invariants | `p1-modeling.md`, `taxonomy-rating.md` | threat model and hypotheses |
 | P1-research | pull disclosed hacktivity/writeups for the target stack | `research_hacktivity.py` (see Research stage below) | `research/` digest + ledger |
 | P2 | map authorized surfaces | `p2-recon.md`, `taxonomy-rating.md` | asset and surface inventories |
+| P2-mobile | static-analyze an in-scope Android app | `module-android-apk.md` (via `apk_recon.sh`) | decompile + exported/secret/endpoint report |
 | P3 | design controlled tests | `p3-test-design.md` | test matrix |
 | P4 | validate with controls | `p4-validation.md` | evidence ledger |
 | P5 | root cause and severity | `p5-triage.md`, `taxonomy-rating.md`, `bountyforge-judging.md`, `bountyforge-cvss.md` | findings index |
@@ -305,6 +306,11 @@ python3 <skill-dir>/scripts/import_scope.py ./engagement --scope program-scope.c
 
 # per-surface P1/P2 hunting checklist (taxonomy-derived; advisory)
 python3 <skill-dir>/scripts/surface_checklist.py ./engagement --out checklist.md
+
+# Android APK static recon (P2 mobile): decompile + exported/secret/endpoint report
+bash <skill-dir>/scripts/apk_recon.sh /path/to/target.apk -o ./engagement/apk-recon
+# large/obfuscated APK: add deobfuscation
+VHS_JADX_ARGS=--deobf bash <skill-dir>/scripts/apk_recon.sh /path/to/target.apk -o ./engagement/apk-recon
 
 # P1/P2 research: disclosed hacktivity/writeups -> research/ (hypothesis input)
 python3 <skill-dir>/scripts/research_hacktivity.py ./engagement \
@@ -397,6 +403,7 @@ Non-obvious behaviors that bite on resume or reuse. Full detail in each script.
 | `kill_chain_vhs.py` | Only chains findings with status `open/confirmed/triaged/validated`; `bug_class`/`endpoint`/`method` are inferred from each finding's title/root_cause/impact text. Chain severity is always ≥ the strongest matched finding. Reads `findings-index.csv`, writes `kill-chains.md`. |
 | `vulnhunter_orchestrator.py` | `--engagement ./engagement` auto-resolves a doubled path (works from inside the engagement dir). `--resume` requires the **same** `--out` and a matching config fingerprint, else it aborts. Holds an exclusive `flock` on the run dir — one run at a time. |
 | `triage_scan.py` | Reads output paths from `manifest.json` (v2 `outputs` map); a v1 manifest warns and finds nothing. Never marks a match confirmed. |
+| `apk_recon.sh` | Read-only static analysis (never installs/runs the APK). jadx exiting non-zero is normal for obfuscated apps — it still yields a partial decompile; check `report/jadx.log`. Secret candidates are **candidates**: a public client id (OneSignal/FCM app-id, Firebase web config) is not a finding — verify the key against an in-scope endpoint first. |
 | `gate_check.py` / `state.json` | Never hand-edit `current_phase` to skip a gate; advance only with `--advance` after checks + human review. |
 | `rollup_memory.py` | Per-target memory source of truth on resume — reload from `--write` output, never from chat/global memory. Run after every P2/P4/P5 change. |
 | `api_auth_probe.py` | Credentials from **env only** (`API_AUTH_EMAIL`/`API_AUTH_PASS`/`API_AUTH_TOKEN`); read-only GET unless `--method` is explicitly given for a separately authorized action. |
@@ -426,6 +433,13 @@ Non-obvious behaviors that bite on resume or reuse. Full detail in each script.
   `VHS_SQLMAP_HOME` / `VHS_PARAMSPIDER_HOME` / `VHS_NIKTO_HOME`. All clear
   `PYTHONPATH` (PEP 668-safe pattern).
 - `crawl4ai_crawl.py` + `crawl4ai_crawl.sh` — headless-Chromium JS crawl via crawl4ai.
+- `apk_recon.sh` — one-shot Android APK static recon (P2 mobile surface):
+  decompiles with jadx (Java sources) + apktool (manifest/resources), then
+  extracts exported components, deep links, hard-coded secret candidates, and
+  API endpoints into a `report/` folder. Read-only static analysis — never
+  installs or runs the app. Override binaries with `VHS_JADX` / `VHS_APKTOOL`,
+  extra jadx flags with `VHS_JADX_ARGS` (e.g. `--deobf`). See
+  `references/module-android-apk.md` for the full manifest/secret/adb-PoC playbook.
 - `import_scope.py` — import a program scope CSV (H1/BC export) into
   `asset-inventory.csv` with env/type normalization and dry-run preview.
 - `research_hacktivity.py` — P1/P2 research stage: pull disclosed hacktivity /

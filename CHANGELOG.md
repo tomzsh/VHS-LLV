@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.2.0 — Android APK static-analysis module
+
+Added a first-class Android mobile surface. Previously the skill recognized a
+`mobile` surface only as a generic 5-item checklist with no tooling — despite
+APK review being a routine, high-yield source of endpoints, secrets, and
+exported-component bugs. Added:
+
+- **`references/module-android-apk.md`** — full static-analysis playbook:
+  acquire (apkeep/adb), decompile (jadx + apktool), AndroidManifest review
+  (exported components, deep links, debuggable/allowBackup, cleartext,
+  network-security-config), exported-component adb PoCs (`am start` /
+  `content query`), secret + endpoint hunting, WebView/TLS pitfalls, local
+  storage/logging, a severity/FP findings checklist, and P2→P4→P5 feedback.
+- **`scripts/apk_recon.sh`** — one-shot launcher: jadx + apktool decompile, then
+  extracts exported components, deep links, secret candidates, and endpoints
+  into a `report/` folder. Read-only (never installs/runs the app). Env
+  overrides `VHS_JADX` / `VHS_APKTOOL` / `VHS_JADX_ARGS`. Tested end-to-end on a
+  real 60MB+ Flutter APK (14 exported, 21 deep links, 31 secret candidates, 62
+  endpoints extracted; jadx partial-decompile on obfuscated code handled).
+- **`config/tools.json`** — new `mobile` tool profile (jadx, apktool, apkeep,
+  adb, aapt); wired into the `active-safe` and `scanner-safe` profiles.
+- **`check_tools.py`** — detects the mobile toolchain (version probes added).
+- **`surface_checklist.py`** — expanded the `mobile` checklist (deep link,
+  debuggable/backup, cleartext, WebView, insecure storage) from 5 to 9 items.
+- Documented in SKILL.md (Phase router P2-mobile, Bundled scripts, quick
+  commands, quirks table) and `references/index.md` (target modules).
+
 ## 2.1.3 — P5 kill-chain + evidence-capture bug fixes
 
 Bug audit found the P5 kill-chain feature was silently dead and evidence

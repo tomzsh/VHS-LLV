@@ -41,6 +41,7 @@ Load all modules that match the architecture:
 - `module-web3-fintech.md`: wallets, signing, contracts, relayers, bridges, DeFi, payments, custodial flows, balances, ledgers, KYC.
 - **`module-business-logic.md`**: payment manipulation, race condition, ATO, JWT, OIDC, SSRF, upload, rate limit bypass. — Always load in MODE:CRITICAL.
 - **`module-ai-mcp.md`**: MCP server OAuth, dynamic client registration, CLI installer supply chain, AI plugin manifests, QR login, MCP tool enumeration. — Load when the target has MCP/CLI/AI integration.
+- **`module-android-apk.md`**: Android APK static analysis — decompile (jadx/apktool), AndroidManifest (exported components, deep links, debuggable/backup), hard-coded secrets, endpoints, WebView/TLS, adb PoC. — Load when an in-scope asset is an Android app (`.apk`/Play Store id/`com.*` bundle); driven by `scripts/apk_recon.sh`.
 
 ## Search hints
 
