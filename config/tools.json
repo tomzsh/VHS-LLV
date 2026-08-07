@@ -1,0 +1,22 @@
+{
+  "recon": {
+    "required_any": [],
+    "optional": ["subfinder", "assetfinder", "amass", "dnsx", "httpx", "naabu", "gotator", "theHarvester", "rustscan"]
+  },
+  "crawl": {
+    "required_any": [],
+    "optional": ["katana", "gau", "waymore", "scrapling", "crawl4ai", "jsluice"]
+  },
+  "discovery": {
+    "required_any": [],
+    "optional": ["ffuf", "arjun", "gf", "uro", "wafw00f", "gobuster", "feroxbuster", "paramspider", "nikto", "sqlmap"]
+  },
+  "scan": {
+    "required_any": [],
+    "optional": ["nuclei", "dalfox", "interactsh-client"]
+  },
+  "report": {
+    "required_any": ["python3"],
+    "optional": ["jq", "curl"]
+  }
+}

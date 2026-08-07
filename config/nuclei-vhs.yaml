@@ -1,0 +1,10 @@
+# Nuclei tuning for slow/throttled bug-bounty targets (vhs defaults)
+# Prevents "hang" feel: bounded timeout, few retries, sane rate, live progress.
+rate-limit: 60
+bulk-size: 25
+concurrency: 25
+timeout: 12
+retries: 1
+max-host-error: 10
+track-progress: true
+system-resolvers: true

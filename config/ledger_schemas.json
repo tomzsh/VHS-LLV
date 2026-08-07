@@ -1,0 +1,20 @@
+{
+  "asset-inventory.csv": [
+    "asset_id", "asset", "type", "environment", "owner", "scope_status", "source", "notes"
+  ],
+  "surface-inventory.csv": [
+    "surface_id", "asset_id", "surface", "protocol", "auth_requirement", "state_change_risk", "third_party", "scope_status", "source", "confidence", "coverage_status", "notes"
+  ],
+  "hypothesis-ledger.csv": [
+    "hypothesis_id", "asset_id", "surface_id", "actor", "invariant", "mutation", "safe_validation", "priority", "status", "notes"
+  ],
+  "test-matrix.csv": [
+    "test_id", "hypothesis_id", "asset_id", "surface_id", "baseline", "mutation", "expected_result", "negative_control", "evidence_plan", "cleanup", "risk", "permission_mode", "status", "evidence_ids", "notes"
+  ],
+  "evidence-ledger.csv": [
+    "evidence_id", "captured_at_utc", "hypothesis_id", "test_id", "finding_id", "asset_id", "path", "sha256", "sensitivity", "redaction_status", "observation", "cleanup_status"
+  ],
+  "findings-index.csv": [
+    "finding_id", "title", "root_cause", "affected_assets", "status", "severity", "severity_rationale", "confidence", "prerequisite", "demonstrated_impact", "evidence_ids", "relationships", "remediation_owner", "disclosure_status", "retest_status"
+  ]
+}

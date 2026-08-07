@@ -1,0 +1,37 @@
+# Runtime / engagement data — NEVER commit
+engagement/
+engagement*/
+*/engagement/
+vulnhunter-runs/
+run-output/
+**/evidence/
+**/evidence/raw/
+**/evidence/redacted/
+*.evidence
+memory-rollup.md
+session-log.md
+kill-chains.md
+checklist.md
+research/
+
+# Secrets / credentials
+.env
+.env.*
+*credential*
+*cookie*
+*.pem
+*.key
+*token*
+
+# Python runtime
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+
+# OS / editor
+.DS_Store
+*.swp
+*~
