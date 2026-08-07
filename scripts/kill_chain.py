@@ -31,6 +31,7 @@ Usage:
 """
 
 import json
+import os
 import sys
 import time
 import hashlib
@@ -44,7 +45,14 @@ from itertools import combinations
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-CHAIN_DIR = ROOT / "state" / "chains"
+# Where save_chains()/load_chains() persist chain JSON. NEVER default into the
+# skill folder itself (that leaks runtime data into the installed skill / repo).
+# Override with VHS_CHAIN_DIR; otherwise use a temp-dir subfolder. The vhs
+# adapter (kill_chain_vhs.py) writes its report straight to the engagement dir
+# and does not call save/load, so this default is only a fallback.
+import tempfile
+
+CHAIN_DIR = Path(os.environ.get("VHS_CHAIN_DIR") or (Path(tempfile.gettempdir()) / "vhs-kill-chains"))
 
 
 # ---------------------------------------------------------------------------
@@ -379,8 +387,6 @@ class KillChainBuilder:
 
     def __init__(self, target: str):
         self.target = target
-        CHAIN_DIR.mkdir(parents=True, exist_ok=True)
-        (CHAIN_DIR / target).mkdir(exist_ok=True)
 
     def score_chain(self, pattern: ChainPattern,
                     findings: List[Dict]) -> Optional[ChainCandidate]:
@@ -716,6 +722,7 @@ class KillChainBuilder:
 
     def save_chains(self, candidates: List[ChainCandidate]):
         """Persist chain candidates."""
+        (CHAIN_DIR / self.target).mkdir(parents=True, exist_ok=True)
         out = CHAIN_DIR / self.target / "chains.json"
         data = []
         for c in candidates:

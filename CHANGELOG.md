@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.2.1 — kill_chain.py no longer writes into the skill folder
+
+Fixed a cleanup bug: `kill_chain.py` defaulted `CHAIN_DIR` to
+`<skill>/state/chains` and created `state/chains/<target>/` on **every**
+`KillChainBuilder()` instantiation (the adapter always instantiates), leaving an
+empty `state/` folder inside the installed skill / repo — runtime data leaking
+into the skill tree.
+
+- `CHAIN_DIR` now defaults to a temp dir (`$TMPDIR/vhs-kill-chains`), overridable
+  with `VHS_CHAIN_DIR`; it is never placed inside the skill folder.
+- Directory creation moved from `__init__` (eager, every instance) to
+  `save_chains()` (lazy, only when chains are actually persisted). Instantiating
+  a builder no longer creates any folder.
+- `save_chains()` / `load_chains()` still work unchanged when called.
+- Removed the stray `state/` artifact; added `state/` + `vhs-kill-chains/` to
+  `.gitignore`.
+- Note: the per-target *engagement* memory system (`<engagement>/state.json` +
+  ledgers + `memory-rollup.md`) is unrelated and was already correct — verified
+  isolation across two separate engagements.
+
 ## 2.2.0 — Android APK static-analysis module
 
 Added a first-class Android mobile surface. Previously the skill recognized a

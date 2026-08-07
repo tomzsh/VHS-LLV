@@ -14,6 +14,10 @@ kill-chains.md
 checklist.md
 research/
 
+# kill_chain.py runtime chain cache (defaults to a temp dir; never in-repo)
+state/
+vhs-kill-chains/
+
 # Secrets / credentials
 .env
 .env.*

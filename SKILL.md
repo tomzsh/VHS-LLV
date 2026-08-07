@@ -1,7 +1,7 @@
 ---
 name: vhs
 description: Authorized pentest/bug-bounty/code-audit, P0-P6 gates.
-version: 2.2.0
+version: 2.2.1
 author: tomzsh
 platforms: [linux]
 metadata:
@@ -400,7 +400,7 @@ Non-obvious behaviors that bite on resume or reuse. Full detail in each script.
 |---|---|
 | `import_scope.py` | Refuses to overwrite a **non-empty** `asset-inventory.csv`; pass `--force` to replace, or merge manually. `--dry-run` previews without writing. |
 | `evidence_capture.py` | `--evidence-id` must be **unique** — a duplicate is rejected *before* any file is written (no orphan raw file, no silent ledger overwrite). Raw+redacted files are chmod `0600`. |
-| `kill_chain_vhs.py` | Only chains findings with status `open/confirmed/triaged/validated`; `bug_class`/`endpoint`/`method` are inferred from each finding's title/root_cause/impact text. Chain severity is always ≥ the strongest matched finding. Reads `findings-index.csv`, writes `kill-chains.md`. |
+| `kill_chain_vhs.py` | Only chains findings with status `open/confirmed/triaged/validated`; `bug_class`/`endpoint`/`method` are inferred from each finding's title/root_cause/impact text. Chain severity is always ≥ the strongest matched finding. Reads `findings-index.csv`, writes `kill-chains.md`. The port's own `save_chains()` cache defaults to `$TMPDIR/vhs-kill-chains` (override `VHS_CHAIN_DIR`) — never inside the skill folder. |
 | `vulnhunter_orchestrator.py` | `--engagement ./engagement` auto-resolves a doubled path (works from inside the engagement dir). `--resume` requires the **same** `--out` and a matching config fingerprint, else it aborts. Holds an exclusive `flock` on the run dir — one run at a time. |
 | `triage_scan.py` | Reads output paths from `manifest.json` (v2 `outputs` map); a v1 manifest warns and finds nothing. Never marks a match confirmed. |
 | `apk_recon.sh` | Read-only static analysis (never installs/runs the APK). jadx exiting non-zero is normal for obfuscated apps — it still yields a partial decompile; check `report/jadx.log`. Secret candidates are **candidates**: a public client id (OneSignal/FCM app-id, Firebase web config) is not a finding — verify the key against an in-scope endpoint first. |
