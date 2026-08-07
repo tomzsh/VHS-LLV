@@ -451,6 +451,10 @@ Non-obvious behaviors that bite on resume or reuse. Full detail in each script.
   the source of truth).
 - `status.py` — compact engagement status: current phase, gate history,
   per-ledger counts (open hypotheses, test states, evidence, findings).
+- `schemas.py` — *(internal module, not run directly)* shared ledger-schema
+  helpers: loads `config/ledger_schemas.json` and creates the engagement's CSV
+  ledgers with the correct headers. Imported by `new_engagement.py` and other
+  ledger-writing scripts.
 
 ## Bundled assets
 
