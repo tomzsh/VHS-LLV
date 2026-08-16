@@ -42,6 +42,10 @@ from pathlib import Path
 from policy import PolicyError, ScopePolicy, authorize_run
 
 
+STATE_CHANGE_ALIASES = {"state_change", "api_state_change"}
+LOGIN_ALIASES = {"login", "authentication"}
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("base_url", help="API base, e.g. https://api-uat.example.com")
@@ -79,23 +83,107 @@ def resolve_endpoint(base_url: str, endpoint: str, policy: ScopePolicy) -> str:
     return resolved
 
 
+def normalize_method_permissions(values: object) -> set[str]:
+    if not isinstance(values, (list, tuple, set)):
+        return set()
+    normalized: set[str] = set()
+    for value in values:
+        token = re.sub(r"[^a-z0-9]+", "_", str(value).strip().casefold()).strip("_")
+        if token:
+            normalized.add(token)
+    return normalized
+
+
 def state_change_allowed(engagement: dict, method: str, explicit_flag: bool) -> bool:
     """Return whether an explicitly requested target method is authorized."""
-    normalized_method = method.lower()
+    normalized_method = re.sub(
+        r"[^a-z0-9]+", "_", method.strip().casefold(),
+    ).strip("_")
+    allowed = normalize_method_permissions(engagement.get("allowed_methods"))
+    prohibited = normalize_method_permissions(engagement.get("prohibited_methods"))
+    if normalized_method in prohibited:
+        return False
     if normalized_method in {"get", "head"}:
         return True
+    if prohibited & STATE_CHANGE_ALIASES:
+        return False
     if not explicit_flag:
         return False
-    allowed = {str(value).lower() for value in engagement.get("allowed_methods") or []}
-    return normalized_method in allowed or bool({"state_change", "api_state_change"} & allowed)
+    return normalized_method in allowed or bool(STATE_CHANGE_ALIASES & allowed)
 
 
 def login_allowed(engagement: dict) -> bool:
-    allowed = {str(value).lower() for value in engagement.get("allowed_methods") or []}
-    return bool({"login", "authentication"} & allowed)
+    allowed = normalize_method_permissions(engagement.get("allowed_methods"))
+    prohibited = normalize_method_permissions(engagement.get("prohibited_methods"))
+    if prohibited & LOGIN_ALIASES:
+        return False
+    return bool(LOGIN_ALIASES & allowed)
 
 
-def login(login_url: str, accept: str, token_path: str, timeout: int) -> str:
+def url_origin(url: str) -> tuple[str, str, int]:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        raise PolicyError("redirect target must be an HTTP(S) URL with a hostname")
+    try:
+        port = parsed.port
+    except ValueError:
+        raise PolicyError("redirect target has an invalid port") from None
+    return (
+        parsed.scheme.lower(),
+        parsed.hostname.rstrip(".").encode("idna").decode("ascii").casefold(),
+        port or (443 if parsed.scheme.lower() == "https" else 80),
+    )
+
+
+class ScopeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Follow only policy-approved redirects on the request's original origin."""
+
+    def __init__(self, policy: ScopePolicy, original_url: str) -> None:
+        super().__init__()
+        self.policy = policy
+        self.original_origin = url_origin(original_url)
+
+    @staticmethod
+    def refuse(fp, message: str):
+        fp.close()
+        raise PolicyError(message)
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        resolved = urllib.parse.urljoin(req.full_url, newurl)
+        parsed = urllib.parse.urlsplit(resolved)
+        if parsed.username is not None or parsed.password is not None:
+            self.refuse(fp, "redirect target must not contain credentials")
+        if not self.policy.url_allowed(resolved):
+            self.refuse(fp, "redirect target is not permitted by the engagement scope")
+        if url_origin(resolved) != self.original_origin:
+            self.refuse(fp, "authenticated redirects must remain on the original origin")
+        return super().redirect_request(req, fp, code, msg, headers, resolved)
+
+
+def scoped_urlopen(
+    request: urllib.request.Request,
+    timeout: int,
+    policy: ScopePolicy | None = None,
+):
+    effective_policy = policy
+    if effective_policy is None:
+        parsed = urllib.parse.urlsplit(request.full_url)
+        if not parsed.hostname:
+            raise PolicyError("request URL must contain a hostname")
+        effective_policy = ScopePolicy([parsed.hostname])
+    opener = urllib.request.build_opener(
+        ScopeRedirectHandler(effective_policy, request.full_url),
+    )
+    return opener.open(request, timeout=timeout)
+
+
+def login(
+    login_url: str,
+    accept: str,
+    token_path: str,
+    timeout: int,
+    policy: ScopePolicy | None = None,
+) -> str:
     tok = os.environ.get("API_AUTH_TOKEN")
     if tok:
         print("[+] using API_AUTH_TOKEN from env")
@@ -112,13 +200,16 @@ def login(login_url: str, accept: str, token_path: str, timeout: int) -> str:
                  "User-Agent": "security-research (authorized)"},
         method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with scoped_urlopen(req, timeout, policy) as r:
             data = json.loads(r.read().decode())
     except urllib.error.HTTPError as exc:
         print(f"[!] login failed: HTTP {exc.code}")
         sys.exit(1)
     except (urllib.error.URLError, TimeoutError):
         print("[!] login failed: unreachable")
+        sys.exit(1)
+    except PolicyError:
+        print("[!] login failed: redirect refused")
         sys.exit(1)
     except (json.JSONDecodeError, UnicodeDecodeError):
         print("[!] login failed: invalid response")
@@ -137,13 +228,20 @@ def login(login_url: str, accept: str, token_path: str, timeout: int) -> str:
     return str(cur)
 
 
-def req(url: str, token: str, accept: str, method: str, timeout: int) -> tuple[int | None, object]:
+def req(
+    url: str,
+    token: str,
+    accept: str,
+    method: str,
+    timeout: int,
+    policy: ScopePolicy | None = None,
+) -> tuple[int | None, object]:
     r = urllib.request.Request(
         url, method=method,
         headers={"Authorization": f"Bearer {token}", "Accept": accept,
                  "User-Agent": "security-research (authorized)"})
     try:
-        with urllib.request.urlopen(r, timeout=timeout) as resp:
+        with scoped_urlopen(r, timeout, policy) as resp:
             body = resp.read()
             try:
                 return resp.status, json.loads(body.decode())
@@ -153,6 +251,8 @@ def req(url: str, token: str, accept: str, method: str, timeout: int) -> tuple[i
         return e.code, e.read()[:300].decode(errors="replace")
     except (urllib.error.URLError, TimeoutError):
         return None, {"error": "unreachable"}
+    except PolicyError:
+        return None, {"error": "redirect refused"}
 
 
 def jwt_claims(token: str) -> dict:
@@ -223,14 +323,14 @@ def main() -> int:
         print("[!] authorization refused: credential login requires allowed_methods login or authentication", file=sys.stderr)
         return 2
 
-    tok = login(login_url, args.accept, args.token_path, args.timeout)
+    tok = login(login_url, args.accept, args.token_path, args.timeout, policy)
 
     print("\n=== JWT claims (info only) ===")
     print(json.dumps(redact(jwt_claims(tok)), indent=2)[:1200])
 
     print(f"\n=== baseline ({method}) ===")
     for endpoint in endpoints:
-        code, body = req(endpoint, tok, args.accept, method, args.timeout)
+        code, body = req(endpoint, tok, args.accept, method, args.timeout, policy)
         s = json.dumps(redact(body)) if isinstance(body, (dict, list)) else str(redact(body))
         print(f"{method} {display_endpoint(endpoint)} -> {code} | {s[:140]}")
         time.sleep(args.rate)
@@ -240,7 +340,7 @@ def main() -> int:
         for endpoint in endpoints:
             sep = "&" if "?" in endpoint else "?"
             mutated = resolve_endpoint(base, f"{endpoint}{sep}{args.swap_param}={args.swap_id}", policy)
-            code, body = req(mutated, tok, args.accept, method, args.timeout)
+            code, body = req(mutated, tok, args.accept, method, args.timeout, policy)
             s = json.dumps(redact(body)) if isinstance(body, (dict, list)) else str(redact(body))
             print(f"{method} {display_endpoint(mutated)} -> {code} | {s[:140]}")
             time.sleep(args.rate)

@@ -30,7 +30,8 @@ or debugging a resume/tool issue. The scripts themselves are the source of truth
 - **Recon/crawl:** `vulnhunter-tools.sh`, `scrapling_crawl.py/.sh`,
   `crawl4ai_crawl.py/.sh`, `apk_recon.sh`, `surface_checklist.py`,
   `import_scope.py`.
-- **Specialized analysis:** `graphql_cop.sh`, `code_graph_rag.sh`,
+- **Specialized analysis:** `graphql_cop.sh` (requires `--engagement` and `-t`),
+  `code_graph_rag.sh`,
   `code_graph_grounding.py`, `api_auth_probe.py`.
 - **Research/chaining:** `research_hacktivity.py`, `research_sources.py`,
   `kill_chain.py`, `kill_chain_vhs.py`.

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import csv
+import email.message
 import hashlib
+import io
 import json
 import os
 import re
@@ -9,17 +11,79 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
+import urllib.request
+import urllib.response
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 SKILL = Path(__file__).resolve().parents[1]
 SCRIPTS = SKILL / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from policy import PolicyError, ScopePolicy, authorize_run  # noqa: E402
-from api_auth_probe import resolve_endpoint, state_change_allowed  # noqa: E402
+from api_auth_probe import login, login_allowed, req, resolve_endpoint, state_change_allowed  # noqa: E402
 from schemas import LEDGER_SCHEMAS, create_missing_ledgers  # noqa: E402
 from vulnhunter_orchestrator import Step, authorization_fingerprint, stage  # noqa: E402
+
+
+def write_authorized_engagement(
+    root: Path,
+    allowed_assets: list[str],
+    *,
+    allowed_methods: list[str] | None = None,
+    prohibited_methods: list[str] | None = None,
+) -> None:
+    now = datetime.now(timezone.utc)
+    root.mkdir()
+    (root / "engagement.json").write_text(
+        json.dumps(
+            {
+                "engagement_id": "test-001",
+                "authorization_status": "confirmed",
+                "permission_mode": "ACTIVE_SAFE",
+                "testing_window": {
+                    "start": (now - timedelta(days=1)).isoformat(),
+                    "end": (now + timedelta(days=1)).isoformat(),
+                },
+                "allowed_assets": allowed_assets,
+                "excluded_assets": [],
+                "allowed_methods": allowed_methods or ["automated_scanning"],
+                "prohibited_methods": prohibited_methods or [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "state.json").write_text(
+        json.dumps({"phases": {"P0": {"status": "completed"}}}),
+        encoding="utf-8",
+    )
+
+
+class OfflineHttpHandler(urllib.request.BaseHandler):
+    handler_order = 100
+
+    def __init__(
+        self,
+        responses: dict[str, tuple[int, dict[str, str], bytes]],
+        requests: list[urllib.request.Request],
+    ) -> None:
+        self.responses = responses
+        self.requests = requests
+
+    def http_open(self, request: urllib.request.Request):
+        self.requests.append(request)
+        status, raw_headers, body = self.responses[request.full_url]
+        headers = email.message.Message()
+        for name, value in raw_headers.items():
+            headers[name] = value
+        response = urllib.response.addinfourl(
+            io.BytesIO(body), headers, request.full_url, status,
+        )
+        response.msg = "offline response"
+        return response
+
+    https_open = http_open
 
 
 class ReferenceIntegrityTests(unittest.TestCase):
@@ -100,7 +164,10 @@ class ContextSliceTests(unittest.TestCase):
 
         source = "# 根\n## 1. 高频入口 / Entry\nbody\n## 2. 证据 / Evidence\nproof\n"
         self.assertEqual(parse_headings(source)[1], (2, "1. 高频入口 / Entry", 2, 3))
-        self.assertEqual(slice_sections(source, ["高频入口"]), "## 1. 高频入口 / Entry\nbody\n")
+        self.assertEqual(
+            slice_sections(source, ["1. 高频入口 / Entry"]),
+            "## 1. 高频入口 / Entry\nbody\n",
+        )
 
     def test_context_slice_closes_tilde_fence_with_longer_delimiter(self) -> None:
         from context_slice import slice_sections
@@ -133,6 +200,80 @@ class ContextSliceTests(unittest.TestCase):
             )
             self.assertEqual(full.returncode, 0, full.stderr)
             self.assertEqual(full.stdout, source)
+
+    def test_context_slice_terms_must_match_complete_outline_titles(self) -> None:
+        from context_slice import slice_sections
+
+        source = "# Root\nintro\n## 3. Probe\nbody\n## 8. Compliance\nstop\n"
+        self.assertEqual(slice_sections(source, ["Probe"]), source)
+
+    def test_safe_playbook_slices_include_safety_across_real_playbooks(self) -> None:
+        cases = (
+            ("rce.md", "3. 探测手法", "## 8. 不要做的事"),
+            ("graphql.md", "3. 探测手法", "## 8. 不要做的事"),
+            ("info-disclosure.md", "3. 探测手法", "## 8. 不要做的事"),
+        )
+        for filename, section, safety_heading in cases:
+            with self.subTest(filename=filename):
+                process = subprocess.run(
+                    [
+                        sys.executable,
+                        str(SCRIPTS / "context_slice.py"),
+                        "--file",
+                        str(SKILL / "references" / "attack-playbooks" / filename),
+                        "--safe-playbook",
+                        "--section",
+                        section,
+                    ],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(process.returncode, 0, process.stderr)
+                self.assertIn(safety_heading, process.stdout)
+                self.assertNotIn("## 4. Bypass", process.stdout)
+                self.assertNotIn("## 5. 利用", process.stdout)
+
+    def test_safe_playbook_refuses_evasion_or_post_exploitation_sections(self) -> None:
+        for filename, section in (
+            ("rce.md", "4. Bypass 矩阵"),
+            ("rce.md", "5. 利用提权 / 横向"),
+        ):
+            with self.subTest(section=section):
+                process = subprocess.run(
+                    [
+                        sys.executable,
+                        str(SCRIPTS / "context_slice.py"),
+                        "--file",
+                        str(SKILL / "references" / "attack-playbooks" / filename),
+                        "--safe-playbook",
+                        "--section",
+                        section,
+                    ],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertNotEqual(process.returncode, 0)
+                self.assertIn("unsafe section", process.stderr)
+
+    def test_safe_playbook_refuses_forbidden_playbook_categories(self) -> None:
+        process = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "context_slice.py"),
+                "--file",
+                str(SKILL / "references" / "attack-playbooks" / "intranet-postexp.md"),
+                "--safe-playbook",
+                "--section",
+                "内网渗透 / 后渗透",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertNotEqual(process.returncode, 0)
+        self.assertIn("not routable", process.stderr)
 
 
 class SchemaTests(unittest.TestCase):
@@ -184,6 +325,8 @@ class ToolCheckTests(unittest.TestCase):
 
     def test_graphql_cop_launcher_honors_home_override(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
+            engagement = Path(temp) / "engagement"
+            write_authorized_engagement(engagement, ["example.com"])
             home = Path(temp) / "graphql-cop"
             python_bin = home / "venv" / "bin" / "python"
             python_bin.parent.mkdir(parents=True)
@@ -198,6 +341,7 @@ class ToolCheckTests(unittest.TestCase):
             process = subprocess.run(
                 [
                     "bash", str(SCRIPTS / "graphql_cop.sh"),
+                    "--engagement", str(engagement),
                     "-t", "https://example.com/graphql", "-o", "json",
                 ],
                 text=True,
@@ -209,8 +353,73 @@ class ToolCheckTests(unittest.TestCase):
             self.assertEqual(process.returncode, 0, process.stderr)
             args = log.read_text(encoding="utf-8").splitlines()
             self.assertEqual(args[0], str(home / "graphql-cop.py"))
+            self.assertNotIn("--engagement", args)
+            self.assertNotIn(str(engagement), args)
             self.assertIn("https://example.com/graphql", args)
             self.assertIn("json", args)
+
+    def test_graphql_cop_refuses_out_of_scope_before_tool_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            engagement = Path(temp) / "engagement"
+            write_authorized_engagement(engagement, ["example.com"])
+            home = Path(temp) / "graphql-cop"
+            python_bin = home / "venv" / "bin" / "python"
+            python_bin.parent.mkdir(parents=True)
+            log = Path(temp) / "args.log"
+            python_bin.write_text(
+                "#!/usr/bin/env bash\n"
+                f"printf '%s\\n' \"$@\" > {str(log)!r}\n",
+                encoding="utf-8",
+            )
+            python_bin.chmod(0o700)
+            (home / "graphql-cop.py").write_text("# fake\n", encoding="utf-8")
+
+            process = subprocess.run(
+                [
+                    "bash", str(SCRIPTS / "graphql_cop.sh"),
+                    "--engagement", str(engagement),
+                    "-t", "https://evil.test/graphql", "-o", "json",
+                ],
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+                env={**os.environ, "VHS_GRAPHQL_COP_HOME": str(home)},
+            )
+
+            self.assertNotEqual(process.returncode, 0)
+            self.assertFalse(log.exists(), "GraphQL Cop ran before scope refusal")
+            self.assertIn("authorization refused", process.stderr)
+
+    def test_graphql_cop_requires_engagement_before_tool_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp) / "graphql-cop"
+            python_bin = home / "venv" / "bin" / "python"
+            python_bin.parent.mkdir(parents=True)
+            log = Path(temp) / "args.log"
+            python_bin.write_text(
+                "#!/usr/bin/env bash\n"
+                f"printf '%s\\n' \"$@\" > {str(log)!r}\n",
+                encoding="utf-8",
+            )
+            python_bin.chmod(0o700)
+            (home / "graphql-cop.py").write_text("# fake\n", encoding="utf-8")
+
+            process = subprocess.run(
+                [
+                    "bash", str(SCRIPTS / "graphql_cop.sh"),
+                    "-t", "https://example.com/graphql", "-o", "json",
+                ],
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+                env={**os.environ, "VHS_GRAPHQL_COP_HOME": str(home)},
+            )
+
+            self.assertNotEqual(process.returncode, 0)
+            self.assertFalse(log.exists(), "GraphQL Cop ran without an engagement")
+            self.assertIn("--engagement is required", process.stderr)
 
     def test_check_tools_reports_graphql_cop_from_override(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -442,6 +651,125 @@ class ApiProbeTests(unittest.TestCase):
         self.assertTrue(state_change_allowed(engagement, "POST", True))
         self.assertFalse(state_change_allowed(engagement, "DELETE", True))
 
+    def test_prohibited_methods_override_read_and_state_change_allows(self) -> None:
+        read_conflict = {
+            "allowed_methods": ["GET", "HEAD"],
+            "prohibited_methods": [" get ", "head"],
+        }
+        self.assertFalse(state_change_allowed(read_conflict, "GET", False))
+        self.assertFalse(state_change_allowed(read_conflict, "HEAD", False))
+
+        exact_conflict = {
+            "allowed_methods": ["POST", "DELETE", "state-change"],
+            "prohibited_methods": ["post", " delete "],
+        }
+        self.assertFalse(state_change_allowed(exact_conflict, "POST", True))
+        self.assertFalse(state_change_allowed(exact_conflict, "DELETE", True))
+
+    def test_prohibited_state_change_alias_denies_specific_method_allow(self) -> None:
+        for alias in ("state-change", "API State Change"):
+            with self.subTest(alias=alias):
+                engagement = {
+                    "allowed_methods": ["POST", "api_state_change"],
+                    "prohibited_methods": [alias],
+                }
+                self.assertFalse(state_change_allowed(engagement, "POST", True))
+
+    def test_prohibited_login_alias_overrides_login_allow(self) -> None:
+        for allowed, prohibited in (
+            ("login", "authentication"),
+            ("AUTHENTICATION", " login "),
+        ):
+            with self.subTest(allowed=allowed, prohibited=prohibited):
+                self.assertFalse(
+                    login_allowed(
+                        {
+                            "allowed_methods": [allowed],
+                            "prohibited_methods": [prohibited],
+                        }
+                    )
+                )
+
+    def test_login_refuses_cross_origin_redirect_before_credentials_leave_origin(self) -> None:
+        login_url = "https://api.example.com/login"
+        sink_url = "https://evil.test/token"
+        responses = {
+            login_url: (302, {"Location": sink_url}, b""),
+            sink_url: (200, {"Content-Type": "application/json"}, b'{"access_token":"redirected"}'),
+        }
+        requests: list[urllib.request.Request] = []
+        real_build_opener = urllib.request.build_opener
+        unsafe_opener = real_build_opener(OfflineHttpHandler(responses, requests))
+
+        def offline_build_opener(*handlers: object):
+            return real_build_opener(*handlers, OfflineHttpHandler(responses, requests))
+
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"API_AUTH_EMAIL": "researcher@example.com", "API_AUTH_PASS": "test-only"},
+                clear=True,
+            ),
+            mock.patch("urllib.request.urlopen", unsafe_opener.open),
+            mock.patch("urllib.request.build_opener", side_effect=offline_build_opener),
+        ):
+            with self.assertRaises(SystemExit):
+                login(login_url, "application/json", "access_token", 5)
+        self.assertEqual([request.full_url for request in requests], [login_url])
+
+    def test_target_refuses_out_of_scope_redirect_without_forwarding_authorization(self) -> None:
+        source_url = "https://api.example.com/start"
+        sink_url = "https://evil.test/outside"
+        responses = {
+            source_url: (302, {"Location": sink_url}, b""),
+            sink_url: (200, {"Content-Type": "application/json"}, b'{"reached":true}'),
+        }
+        requests: list[urllib.request.Request] = []
+        real_build_opener = urllib.request.build_opener
+        unsafe_opener = real_build_opener(OfflineHttpHandler(responses, requests))
+
+        def offline_build_opener(*handlers: object):
+            return real_build_opener(*handlers, OfflineHttpHandler(responses, requests))
+
+        with (
+            mock.patch("urllib.request.urlopen", unsafe_opener.open),
+            mock.patch("urllib.request.build_opener", side_effect=offline_build_opener),
+        ):
+            status, body = req(source_url, "secret-token", "application/json", "GET", 5)
+
+        self.assertIsNone(status)
+        self.assertEqual(body, {"error": "redirect refused"})
+        self.assertEqual([request.full_url for request in requests], [source_url])
+
+    def test_target_refuses_cross_origin_redirect_even_when_both_hosts_are_in_scope(self) -> None:
+        source_url = "https://api.example.com/start"
+        sink_url = "https://cdn.example.com/next"
+        responses = {
+            source_url: (302, {"Location": sink_url}, b""),
+            sink_url: (200, {"Content-Type": "application/json"}, b'{"reached":true}'),
+        }
+        requests: list[urllib.request.Request] = []
+        real_build_opener = urllib.request.build_opener
+
+        def offline_build_opener(*handlers: object):
+            return real_build_opener(*handlers, OfflineHttpHandler(responses, requests))
+
+        with mock.patch(
+            "urllib.request.build_opener", side_effect=offline_build_opener,
+        ):
+            status, body = req(
+                source_url,
+                "secret-token",
+                "application/json",
+                "GET",
+                5,
+                ScopePolicy(["api.example.com", "cdn.example.com"]),
+            )
+
+        self.assertIsNone(status)
+        self.assertEqual(body, {"error": "redirect refused"})
+        self.assertEqual([request.full_url for request in requests], [source_url])
+
 
 class DeliverableTests(unittest.TestCase):
     def test_import_failure_returns_nonzero_and_reports_failure(self) -> None:
@@ -469,6 +797,33 @@ class DeliverableTests(unittest.TestCase):
             )
             self.assertNotEqual(process.returncode, 0)
             self.assertIn("import failed", process.stdout + process.stderr)
+
+    def test_docx_close_failure_returns_nonzero_and_reports_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            root.mkdir()
+            fakebin = Path(temp) / "bin"
+            fakebin.mkdir()
+            officecli = fakebin / "officecli"
+            officecli.write_text(
+                "#!/usr/bin/env bash\n"
+                "if [ \"$1\" = \"close\" ]; then\n"
+                "  case \"$2\" in *final-report.docx) exit 1 ;; esac\n"
+                "fi\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            officecli.chmod(0o700)
+            process = subprocess.run(
+                ["bash", str(SCRIPTS / "make_deliverables.sh"), str(root)],
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+                env={**os.environ, "PATH": str(fakebin) + os.pathsep + os.environ.get("PATH", "")},
+            )
+            self.assertNotEqual(process.returncode, 0)
+            self.assertIn("close failed", process.stdout + process.stderr)
 
 
 class AuthorizationTests(unittest.TestCase):
@@ -710,6 +1065,49 @@ class EvidenceCaptureTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(ledger.read_text(encoding="utf-8"), "wrong,header\nkeep,this\n")
+
+    def test_broken_stdout_after_ledger_commit_preserves_artifacts_and_row(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.create_evidence_ledger(root)
+            source = root / "response.txt"
+            source.write_text("payload", encoding="utf-8")
+            read_fd, write_fd = os.pipe()
+            os.close(read_fd)
+            try:
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        "-u",
+                        str(SCRIPTS / "evidence_capture.py"),
+                        str(root),
+                        "--evidence-id",
+                        "EV-001",
+                        "--asset",
+                        "AST-001",
+                        "--observation",
+                        "post-commit output failure",
+                        "--file",
+                        str(source),
+                    ],
+                    stdout=write_fd,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=False,
+                    timeout=30,
+                )
+            finally:
+                os.close(write_fd)
+
+            with (root / "evidence-ledger.csv").open(encoding="utf-8", newline="") as fh:
+                rows = list(csv.DictReader(fh))
+            self.assertEqual(len(rows), 1)
+            artifact = root / rows[0]["path"]
+            self.assertTrue(artifact.is_file())
+            self.assertEqual(hashlib.sha256(artifact.read_bytes()).hexdigest(), rows[0]["sha256"])
+            redacted = root / "evidence" / "redacted" / artifact.name
+            self.assertTrue(redacted.is_file())
+            self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_raw_collision_preserves_preexisting_artifact_and_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

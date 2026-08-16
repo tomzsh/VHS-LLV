@@ -79,7 +79,10 @@ PY
 )" --prop style=Normal >/dev/null 2>&1
   fi
 fi
-officecli close "$DOCX" >/dev/null 2>&1 || true
+if ! officecli close "$DOCX" >/dev/null 2>&1; then
+  echo "[!] close failed for $DOCX" >&2
+  exit 1
+fi
 echo "[+] $DOCX"
 
 # ---- xlsx exports (import ledger CSVs) ----

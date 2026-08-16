@@ -11,6 +11,14 @@ from pathlib import Path
 
 HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)\s*$")
 FENCE_OPEN_RE = re.compile(r"^[ \t]*([`~])\1{2,}")
+NUMBERING_RE = re.compile(r"^\s*\d+(?:\.\d+)*[.)]?\s*")
+FORBIDDEN_SECTION_RE = re.compile(
+    r"\bbypass\b|\bevasion\b|\bpost[- ]?exploitation\b|"
+    r"绕过|利用|提权|横向|权限维持|持久化|反弹\s*shell",
+    re.IGNORECASE,
+)
+FORBIDDEN_PLAYBOOKS = {"dos.md", "intranet-postexp.md"}
+SAFETY_TITLES = {"不要做的事", "compliance", "safety", "do not", "do not do"}
 
 
 def parse_headings(text: str) -> list[tuple[int, str, int, int]]:
@@ -55,13 +63,43 @@ def parse_headings(text: str) -> list[tuple[int, str, int, int]]:
     return headings
 
 
+def normalize_heading_title(title: str) -> str:
+    return " ".join(title.split()).casefold()
+
+
+def unnumbered_heading_title(title: str) -> str:
+    return normalize_heading_title(NUMBERING_RE.sub("", title))
+
+
+def is_safety_heading(title: str) -> bool:
+    return unnumbered_heading_title(title) in SAFETY_TITLES
+
+
+def is_forbidden_heading(title: str) -> bool:
+    return bool(FORBIDDEN_SECTION_RE.search(unnumbered_heading_title(title)))
+
+
+def render_ranges(
+    text: str,
+    included: list[tuple[int, int]],
+    excluded: list[tuple[int, int]] | None = None,
+) -> str:
+    lines = text.splitlines(keepends=True)
+    selected = [False] * len(lines)
+    for start_line, end_line in included:
+        selected[start_line - 1:end_line] = [True] * (end_line - start_line + 1)
+    for start_line, end_line in excluded or []:
+        selected[start_line - 1:end_line] = [False] * (end_line - start_line + 1)
+    return "".join(line for line, keep in zip(lines, selected) if keep)
+
+
 def slice_sections(text: str, terms: list[str]) -> str:
     """Return matching sections with nested children, or the original text."""
-    normalized_terms = [term.casefold() for term in terms if term]
+    normalized_terms = [normalize_heading_title(term) for term in terms if term]
     matches = [
         (start_line, end_line)
         for _level, title, start_line, end_line in parse_headings(text)
-        if any(term in title.casefold() for term in normalized_terms)
+        if normalize_heading_title(title) in normalized_terms
     ]
     if not matches:
         return text
@@ -76,6 +114,51 @@ def slice_sections(text: str, terms: list[str]) -> str:
     return "".join("".join(lines[start_line - 1:end_line]) for start_line, end_line in ranges)
 
 
+def slice_safe_playbook(text: str, terms: list[str]) -> str:
+    """Select exact playbook headings while retaining safety and pruning unsafe sections."""
+    requested = {normalize_heading_title(term) for term in terms if term}
+    if not requested:
+        raise ValueError("safe playbook routing requires at least one exact outline heading")
+
+    headings = parse_headings(text)
+    matches = [
+        heading for heading in headings
+        if normalize_heading_title(heading[1]) in requested
+    ]
+    matched_titles = {normalize_heading_title(heading[1]) for heading in matches}
+    missing = sorted(requested - matched_titles)
+    if missing:
+        raise ValueError(
+            "safe playbook heading not found exactly: " + ", ".join(missing)
+        )
+    unsafe = [title for _level, title, _start, _end in matches if is_forbidden_heading(title)]
+    if unsafe:
+        raise ValueError("unsafe section is not routable: " + ", ".join(unsafe))
+
+    safety = [heading for heading in headings if is_safety_heading(heading[1])]
+    if not safety:
+        raise ValueError("safe playbook has no recognized compliance/safety heading")
+
+    contextual_matches = list(matches)
+    for level, _title, start_line, _end_line in matches:
+        if level <= 2:
+            continue
+        parents = [
+            heading for heading in headings
+            if heading[0] == 2 and heading[2] <= start_line <= heading[3]
+        ]
+        if parents:
+            contextual_matches.append(parents[-1])
+
+    included = [(start, end) for _level, _title, start, end in contextual_matches + safety]
+    excluded = [
+        (start, end)
+        for _level, title, start, end in headings
+        if is_forbidden_heading(title)
+    ]
+    return render_ranges(text, included, excluded)
+
+
 def _read_text(path: Path) -> str:
     with path.open("r", encoding="utf-8", newline="") as handle:
         return handle.read()
@@ -87,6 +170,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--outline", action="store_true", help="Print heading level, title, and line")
     parser.add_argument("--section", action="append", default=[], help="Heading title term to include")
     parser.add_argument("--full", action="store_true", help="Print the original file exactly")
+    parser.add_argument(
+        "--safe-playbook",
+        action="store_true",
+        help="Require exact headings, include safety context, and reject unsafe categories",
+    )
     args = parser.parse_args(argv)
 
     text = _read_text(args.file)
@@ -95,6 +183,13 @@ def main(argv: list[str] | None = None) -> int:
     elif args.outline:
         for level, title, start_line, _end_line in parse_headings(text):
             print(f"{level}\t{title}\t{start_line}")
+    elif args.safe_playbook:
+        if args.file.name.casefold() in FORBIDDEN_PLAYBOOKS:
+            parser.error(f"playbook category is not routable: {args.file.name}")
+        try:
+            sys.stdout.write(slice_safe_playbook(text, args.section))
+        except ValueError as exc:
+            parser.error(str(exc))
     else:
         sys.stdout.write(slice_sections(text, args.section))
     return 0

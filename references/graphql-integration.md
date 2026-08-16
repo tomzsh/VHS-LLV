@@ -24,8 +24,6 @@ the Hermes process or the system interpreter.
 ```bash
 python3 scripts/check_tools.py --profile active-safe --verify --json \
   | jq '.agents.graphql, .verification["graphql-cop"]'
-
-bash scripts/graphql_cop.sh --version
 ```
 
 `graphql-cop` is optional. A missing install must never make the general VHS
@@ -42,6 +40,7 @@ allowed methods.
 ```bash
 umask 077
 bash scripts/graphql_cop.sh \
+  --engagement ./engagement \
   -t 'https://api.example.com/graphql' \
   -o json \
   > ./engagement/graphql-cop.json
@@ -53,6 +52,7 @@ redact it before preserving evidence.
 
 ```bash
 bash scripts/graphql_cop.sh \
+  --engagement ./engagement \
   -t 'https://api.example.com/graphql' \
   -H '{"Authorization":"Bearer REDACTED"}' \
   -o json \
@@ -65,7 +65,8 @@ mutation, negative-control, and cleanup steps in P4.
 
 ## Integration contract
 
-1. P0 authorization and scope policy remain the source of truth.
+1. `--engagement` is mandatory; the launcher enforces P0, the testing window,
+   permission mode, and `ScopePolicy` before starting GraphQL Cop.
 2. The endpoint must be an explicitly supplied URL, not an unfiltered crawler
    candidate.
 3. The GraphQL playbook citation belongs in the P3 test matrix, for example:

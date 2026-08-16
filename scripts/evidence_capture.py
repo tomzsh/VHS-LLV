@@ -91,6 +91,17 @@ def owner_only(path: Path, mode: int) -> None:
         pass
 
 
+def emit_status(message: str) -> None:
+    """Keep post-commit status output from changing capture state or exit status."""
+    try:
+        print(message, flush=True)
+    except OSError:
+        try:
+            sys.stdout = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
+        except OSError:
+            pass
+
+
 @contextmanager
 def ledger_lock(root: Path):
     lock_path = root / ".evidence-ledger.lock"
@@ -138,7 +149,6 @@ def append_ledger_locked(root: Path, row: list[str]) -> None:
     except BaseException:
         temp_path.unlink(missing_ok=True)
         raise
-    print(f"[+] appended {row[0]} to evidence-ledger.csv")
 
 
 def append_ledger(root: Path, row: list[str]) -> None:
@@ -227,6 +237,7 @@ def main() -> int:
     red_copy = red_dir / name
     raw_created = False
     redacted_created = False
+    committed = False
     try:
         with ledger_lock(root):
             # The lock covers duplicate validation, artifact creation, and
@@ -257,16 +268,19 @@ def main() -> int:
                    args.asset, str(rel), digest, args.sensitivity, red_status,
                    args.observation, "keep"]
             append_ledger_locked(root, row)
+            committed = True
     except (OSError, ValueError) as exc:
-        if redacted_created:
-            red_copy.unlink(missing_ok=True)
-        if raw_created:
-            dst_raw.unlink(missing_ok=True)
+        if not committed:
+            if redacted_created:
+                red_copy.unlink(missing_ok=True)
+            if raw_created:
+                dst_raw.unlink(missing_ok=True)
         print(f"[!] {exc}", file=sys.stderr)
         return 2
 
-    print(f"[+] raw:     {dst_raw}")
-    print(f"[+] sha256:  {digest}")
+    emit_status(f"[+] appended {args.evidence_id} to evidence-ledger.csv")
+    emit_status(f"[+] raw:     {dst_raw}")
+    emit_status(f"[+] sha256:  {digest}")
     return 0
 
 

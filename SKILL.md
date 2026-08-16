@@ -93,14 +93,13 @@ Resolve paths relative to this `SKILL.md`, then read:
      --file <skill-dir>/references/attack-playbooks/<type>.md --outline
    python3 <skill-dir>/scripts/context_slice.py \
      --file <skill-dir>/references/attack-playbooks/<type>.md \
-     --section "高频入口" --section "探测手法" --section Bypass \
-     --section "复现" --section "证据" --section "不要做" \
-     --section Entry --section Probe --section Evidence --section Compliance
+     --safe-playbook --section "<exact complete heading copied from the outline>"
    ```
 
-   Use `--full` for P4 exact validation or when the selected slice has no
-   matching heading. The helper is read-only and does not replace the full
-   imported playbook.
+   Safe playbook mode requires exact outline-derived headings, automatically
+   includes the playbook's compliance/safety section, and refuses evasion or
+   post-exploitation categories. Use `--full` for P4 exact validation. The
+   helper is read-only and does not replace the full imported playbook.
 2. `references/operating-contract.md`, `references/index.md`, and the current
    phase reference.
 3. `references/non-qualifying.md` before classifying findings and

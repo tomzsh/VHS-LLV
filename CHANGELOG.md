@@ -1,14 +1,20 @@
 # Changelog
 
-## 2.7.0 — progressive reference context loading
+## 2.7.0 — progressive context loading and final audit hardening
 
 - Added the deterministic, no-network `scripts/context_slice.py` helper for
   Markdown outlines and selected heading sections, with fenced-code handling
   and nested-child preservation.
-- Hardened the routing contract around section-level playbook loading while
-  retaining full imported references; `--full` remains available for P4 exact
-  validation and unmatched headings.
-- Updated the documentation and offline tests for the progressive-loading path.
+- Hardened playbook routing with exact outline-derived terms, mandatory safety
+  context, and refusal of evasion/post-exploitation categories while retaining
+  every imported playbook byte and P4 `--full` access.
+- Added redirect-time scope/origin enforcement to authenticated API probing;
+  authorization headers and login credentials cannot cross origins.
+- Made prohibited API/login methods override normalized allow aliases, kept
+  evidence artifacts consistent after post-commit output failures, and put the
+  GraphQL Cop launcher behind engagement/P0/ScopePolicy validation.
+- Made DOCX close failures fail closed and expanded the offline regression suite
+  for the final audit findings.
 
 ## 2.6.0 — cited 2026 Web2 vulnerability references
 

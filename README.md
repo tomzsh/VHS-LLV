@@ -34,7 +34,7 @@ The folder name (`vhs`) becomes the skill name. Verify the install:
 
 ```bash
 cd ~/.hermes/skills/security/vhs
-python3 -m unittest discover -s tests -v        # 18 offline tests
+python3 -m unittest discover -s tests -v        # 65 offline tests
 python3 -m py_compile scripts/*.py
 python3 scripts/check_tools.py --profile scanner-safe --verify   # optional-tool audit
 ```
@@ -65,14 +65,14 @@ network. Inspect a selected playbook first, then request matching sections:
 ```bash
 python3 scripts/context_slice.py --file references/attack-playbooks/rce.md --outline
 python3 scripts/context_slice.py --file references/attack-playbooks/rce.md \
-  --section "高频入口" --section "探测手法" --section Bypass \
-  --section "复现" --section "证据" --section "不要做" \
-  --section Entry --section Probe --section Evidence --section Compliance
+  --safe-playbook --section "3. 探测手法"
 ```
 
-`--full` prints the source file exactly for P4 exact validation or if no selected
-heading matches. The helper keeps nested child sections and ignores heading-like
-lines inside triple-backtick or triple-tilde fenced code blocks.
+Copy complete heading text from `--outline`; partial substring terms are not
+accepted in safe playbook mode. The safe route retains parent methodology,
+includes the playbook's safety section, and refuses evasion/post-exploitation
+categories. `--full` prints the source exactly for P4 exact validation. The
+helper ignores heading-like lines inside fenced code blocks.
 
 ## Safety and authorization
 

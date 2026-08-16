@@ -36,15 +36,17 @@ python3 <skill-dir>/scripts/context_slice.py \
   --file <skill-dir>/references/attack-playbooks/<type>.md --outline
 python3 <skill-dir>/scripts/context_slice.py \
   --file <skill-dir>/references/attack-playbooks/<type>.md \
-  --section "高频入口" --section "探测手法" --section Bypass \
-  --section "复现" --section "证据" --section "不要做" \
-  --section Entry --section Probe --section Evidence --section Compliance
+  --safe-playbook --section "<exact complete heading copied from the outline>"
 ```
 
-The helper preserves nested children and returns the original file when no
-selected heading matches. Use `--full` for P4 exact validation or when the
-selected slice has no matching heading. This is an additional access path: do
-not rewrite, translate, delete, or reduce imported playbooks or references.
+Safe playbook mode accepts only complete outline-derived heading titles. It
+retains the applicable parent methodology section, automatically adds the
+playbook's compliance/safety section, prunes evasion and post-exploitation
+subsections, and fails closed on missing headings. Do not route `dos.md` or
+`intranet-postexp.md` under this operating contract. Use `--full` only when P4
+exact validation requires the complete selected playbook. This is an additional
+access path: do not rewrite, translate, delete, or reduce imported playbooks or
+references.
 
 ## Surface routing
 
@@ -64,6 +66,8 @@ not rewrite, translate, delete, or reduce imported playbooks or references.
 - Do not load every attack playbook. Read the index, choose by surface, then
   use the progressive playbook-loading policy above for the smallest matching
   section set.
+- Never select Bypass/evasion, exploitation/lateral movement, persistence, DoS,
+  or post-exploitation headings through the progressive route.
 - Do not load `CHANGELOG.md`, the full bundled-script catalog, or unrelated
   phase references during an engagement.
 - If routing is uncertain, load `index.md`, the current phase, and the matching
