@@ -119,6 +119,43 @@ class ReferenceIntegrityTests(unittest.TestCase):
             self.assertNotRegex(text, r"^\+", msg=name)
 
 
+class PentestEngineeringAdapterTests(unittest.TestCase):
+    def _adapter_text(self) -> str:
+        path = SKILL / "references" / "pentest-engineering-adapter.md"
+        return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    def test_adapter_is_opt_in_and_routed_from_skill(self) -> None:
+        adapter_path = SKILL / "references" / "pentest-engineering-adapter.md"
+        skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        self.assertTrue(adapter_path.exists(), "pentest adapter reference is missing")
+        self.assertIn("references/pentest-engineering-adapter.md", skill)
+        self.assertIn("only when modifying", skill.casefold())
+
+    def test_adapter_preserves_pentest_authority_and_boundaries(self) -> None:
+        adapter = " ".join(self._adapter_text().split())
+        for term in (
+            "P0–P6",
+            "authorization",
+            "scope",
+            "fail-closed",
+            "global memory",
+            "live target",
+            "negative control",
+        ):
+            self.assertIn(term, adapter, term)
+        self.assertNotIn("run TDD against the target", adapter.casefold())
+
+    def test_adapter_covers_only_the_selected_engineering_disciplines(self) -> None:
+        adapter = self._adapter_text().casefold()
+        for term in (
+            "systematic debugging",
+            "verification before completion",
+            "offline code",
+            "parallel analysis",
+        ):
+            self.assertIn(term, adapter, term)
+
+
 class ContextSliceTests(unittest.TestCase):
     def test_context_slice_keeps_selected_section_and_nested_children(self) -> None:
         from context_slice import slice_sections

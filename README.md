@@ -34,7 +34,7 @@ The folder name (`vhs`) becomes the skill name. Verify the install:
 
 ```bash
 cd ~/.hermes/skills/security/vhs
-python3 -m unittest discover -s tests -v        # 69 offline tests
+python3 -m unittest discover -s tests -v        # 72 offline tests
 python3 -m py_compile scripts/*.py
 python3 scripts/check_tools.py --profile scanner-safe --verify   # optional-tool audit
 ```
@@ -125,6 +125,21 @@ Additional fail-closed safeguards include:
 - unique evidence artifact names plus locked, atomic ledger writes; and
 - cached, truthful optional-tool readiness checks so unavailable tools are not
   advertised as usable during the same run.
+
+### Optional Superpowers-derived engineering adapter
+
+VHS includes a small pentest-specific adapter inspired by the useful parts of
+Superpowers. It is loaded only when modifying VHS scripts, tests, references,
+configuration, or local tooling; it is not needed for live P0–P6 execution and
+does not require the separate Superpowers Hermes plugin.
+
+The adapter applies systematic debugging to local wrappers and ledgers,
+verification before completion, compact implementation planning, offline
+red-green-refactor for VHS code, and safe read-only parallel analysis. It does
+not replace authorization, scope, evidence, negative-control validation, or
+per-engagement memory isolation. See
+`references/pentest-engineering-adapter.md` for its authority order and
+non-goals.
 
 ## Per-engagement memory isolation
 

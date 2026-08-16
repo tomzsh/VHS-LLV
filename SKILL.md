@@ -111,6 +111,14 @@ Load the engagement state from disk. Do not infer the current phase from chat
 history alone. If a selected reference is missing, stop and report its exact
 path instead of improvising it.
 
+## Pentest engineering adapter (opt-in)
+
+Load `references/pentest-engineering-adapter.md` **only when modifying VHS
+scripts, tests, references, configuration, or local tooling**. Do not load it
+for ordinary P0–P6 target work. It adapts systematic debugging, verification,
+compact planning, offline code TDD, and safe parallel analysis without changing
+VHS authorization, scope, evidence, or per-engagement memory rules.
+
 ## Create an engagement
 
 ```bash
