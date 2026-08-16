@@ -14,7 +14,8 @@ FENCE_OPEN_RE = re.compile(r"^[ \t]*([`~])\1{2,}")
 NUMBERING_RE = re.compile(r"^\s*\d+(?:\.\d+)*[.)]?\s*")
 FORBIDDEN_SECTION_RE = re.compile(
     r"\bbypass\b|\bevasion\b|\bpost[- ]?exploitation\b|"
-    r"绕过|利用|提权|横向|权限维持|持久化|反弹\s*shell",
+    r"\bddos\b|\bdos\b|\bdenial[- ]?of[- ]?service\b|"
+    r"绕过|利用|提权|横向|权限维持|持久化|反弹\s*shell|拒绝服务|拒絕服務",
     re.IGNORECASE,
 )
 FORBIDDEN_PLAYBOOKS = {"dos.md", "intranet-postexp.md"}
@@ -131,7 +132,16 @@ def slice_safe_playbook(text: str, terms: list[str]) -> str:
         raise ValueError(
             "safe playbook heading not found exactly: " + ", ".join(missing)
         )
-    unsafe = [title for _level, title, _start, _end in matches if is_forbidden_heading(title)]
+    unsafe = []
+    for match_level, _match_title, match_start, _match_end in matches:
+        for level, title, start_line, end_line in headings:
+            if (
+                level <= match_level
+                and start_line <= match_start <= end_line
+                and is_forbidden_heading(title)
+                and title not in unsafe
+            ):
+                unsafe.append(title)
     if unsafe:
         raise ValueError("unsafe section is not routable: " + ", ".join(unsafe))
 

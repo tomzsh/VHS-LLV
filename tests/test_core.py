@@ -257,6 +257,77 @@ class ContextSliceTests(unittest.TestCase):
                 self.assertNotEqual(process.returncode, 0)
                 self.assertIn("unsafe section", process.stderr)
 
+    def test_safe_playbook_refuses_dos_section(self) -> None:
+        process = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "context_slice.py"),
+                "--file",
+                str(SKILL / "references" / "attack-playbooks" / "graphql.md"),
+                "--safe-playbook",
+                "--section",
+                "3.5 深度递归 DoS",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertNotEqual(process.returncode, 0)
+        self.assertIn("unsafe section", process.stderr)
+
+    def test_safe_playbook_prunes_dos_child_from_probe_section(self) -> None:
+        process = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "context_slice.py"),
+                "--file",
+                str(SKILL / "references" / "attack-playbooks" / "graphql.md"),
+                "--safe-playbook",
+                "--section",
+                "3. 探测手法",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertIn("### 3.3 IDOR via id", process.stdout)
+        self.assertNotIn("### 3.5 深度递归 DoS", process.stdout)
+
+    def test_safe_playbook_refuses_section_below_forbidden_parent(self) -> None:
+        process = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "context_slice.py"),
+                "--file",
+                str(SKILL / "references" / "attack-playbooks" / "rce.md"),
+                "--safe-playbook",
+                "--section",
+                "5.3 价值升级链",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertNotEqual(process.returncode, 0)
+        self.assertIn("unsafe section", process.stderr)
+
+    def test_context_slice_full_preserves_forbidden_playbook_bytes(self) -> None:
+        path = SKILL / "references" / "attack-playbooks" / "dos.md"
+        process = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "context_slice.py"),
+                "--file",
+                str(path),
+                "--full",
+            ],
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(process.returncode, 0, process.stderr.decode())
+        self.assertEqual(process.stdout, path.read_bytes())
+
     def test_safe_playbook_refuses_forbidden_playbook_categories(self) -> None:
         process = subprocess.run(
             [
