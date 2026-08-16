@@ -16,6 +16,7 @@ SCRIPTS = SKILL / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from policy import PolicyError, ScopePolicy, authorize_run  # noqa: E402
+from api_auth_probe import resolve_endpoint, state_change_allowed  # noqa: E402
 from schemas import LEDGER_SCHEMAS, create_missing_ledgers  # noqa: E402
 from vulnhunter_orchestrator import Step, authorization_fingerprint, stage  # noqa: E402
 
@@ -86,6 +87,59 @@ class ScopeTests(unittest.TestCase):
             policy = ScopePolicy.from_engagement(engagement, scope)
             self.assertTrue(policy.host_allowed("example.com"))
             self.assertFalse(policy.host_allowed("evil.test"))
+
+
+class ApiProbeTests(unittest.TestCase):
+    def test_resolve_endpoint_rejects_absolute_out_of_scope_url(self) -> None:
+        policy = ScopePolicy(["api.example.com"])
+        with self.assertRaises(PolicyError):
+            resolve_endpoint("https://api.example.com", "https://evil.test/x", policy)
+
+    def test_resolve_endpoint_accepts_relative_path(self) -> None:
+        policy = ScopePolicy(["api.example.com"])
+        self.assertEqual(
+            resolve_endpoint("https://api.example.com", "/v1/items", policy),
+            "https://api.example.com/v1/items",
+        )
+
+    def test_resolve_endpoint_rejects_url_credentials(self) -> None:
+        policy = ScopePolicy(["api.example.com"])
+        with self.assertRaises(PolicyError):
+            resolve_endpoint("https://api.example.com", "https://user:pass@api.example.com/v1", policy)
+
+    def test_state_change_requires_flag_and_method_permission(self) -> None:
+        engagement = {"allowed_methods": ["post"]}
+        self.assertFalse(state_change_allowed(engagement, "POST", False))
+        self.assertTrue(state_change_allowed(engagement, "POST", True))
+        self.assertFalse(state_change_allowed(engagement, "DELETE", True))
+
+
+class DeliverableTests(unittest.TestCase):
+    def test_import_failure_returns_nonzero_and_reports_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            root.mkdir()
+            (root / "findings-index.csv").write_text("finding_id\nF-001\n", encoding="utf-8")
+            fakebin = Path(temp) / "bin"
+            fakebin.mkdir()
+            officecli = fakebin / "officecli"
+            officecli.write_text(
+                "#!/usr/bin/env bash\n"
+                "if [ \"$1\" = \"import\" ]; then exit 1; fi\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            officecli.chmod(0o700)
+            process = subprocess.run(
+                ["bash", str(SCRIPTS / "make_deliverables.sh"), str(root)],
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+                env={**os.environ, "PATH": str(fakebin) + os.pathsep + os.environ.get("PATH", "")},
+            )
+            self.assertNotEqual(process.returncode, 0)
+            self.assertIn("import failed", process.stdout + process.stderr)
 
 
 class AuthorizationTests(unittest.TestCase):

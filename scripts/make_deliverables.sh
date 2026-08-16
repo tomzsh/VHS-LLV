@@ -14,6 +14,7 @@
 # Sources: redacted ledgers only — never evidence/raw.
 
 set -euo pipefail
+umask 077
 
 ENG="${1:?usage: make_deliverables.sh <engagement-dir>}"
 ENG="$(cd "$ENG" && pwd)"
@@ -68,12 +69,21 @@ import_csv() { # $1 source csv  $2 target xlsx  $3 sheet
     echo "[.] skip $src (empty/missing)"
     return
   fi
-  officecli create "$tgt" >/dev/null 2>&1 || true
+  if ! officecli create "$tgt" >/dev/null 2>&1; then
+    echo "[!] create failed for $tgt" >&2
+    return 1
+  fi
   # drop pre-existing default sheet if the file was just created fresh
-  officecli import "$tgt" "$sheet" --file "$src" --header >/dev/null 2>&1 \
-    || officecli import "$tgt" "$sheet" --stdin --format csv --header < "$src" >/dev/null 2>&1 \
-    || echo "[!] import failed for $src"
-  officecli close "$tgt" >/dev/null 2>&1 || true
+  if ! officecli import "$tgt" "$sheet" --file "$src" --header >/dev/null 2>&1 \
+    && ! officecli import "$tgt" "$sheet" --stdin --format csv --header < "$src" >/dev/null 2>&1; then
+    echo "[!] import failed for $src" >&2
+    officecli close "$tgt" >/dev/null 2>&1 || true
+    return 1
+  fi
+  if ! officecli close "$tgt" >/dev/null 2>&1; then
+    echo "[!] close failed for $tgt" >&2
+    return 1
+  fi
   echo "[+] $tgt"
 }
 
