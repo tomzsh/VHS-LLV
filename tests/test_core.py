@@ -16,6 +16,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 from policy import PolicyError, ScopePolicy, authorize_run  # noqa: E402
 from schemas import LEDGER_SCHEMAS, create_missing_ledgers  # noqa: E402
+from vulnhunter_orchestrator import Step, authorization_fingerprint, stage  # noqa: E402
 
 
 class SchemaTests(unittest.TestCase):
@@ -209,6 +210,48 @@ class OrchestratorTests(unittest.TestCase):
             self.assertEqual(first.returncode, 0, first.stderr)
             self.assertEqual(second.returncode, 0, second.stderr)
             self.assertTrue((out / "stages" / "00-plan.json").exists())
+
+    def test_authorization_fingerprint_changes_with_scope_and_scope_file(self) -> None:
+        engagement = {
+            "authorization_status": "confirmed",
+            "permission_mode": "ACTIVE_SAFE",
+            "allowed_assets": ["example.com"],
+            "excluded_assets": [],
+            "allowed_methods": ["http_probe"],
+            "prohibited_methods": [],
+            "testing_window": "2026-01-01T00:00:00Z..2026-12-31T23:59:59Z",
+            "rate_limits": "10 req/s",
+            "stop_conditions": ["instability"],
+        }
+        state = {"phases": {"P0": {"status": "completed"}}}
+        with tempfile.TemporaryDirectory() as temp:
+            scope = Path(temp) / "scope.txt"
+            scope.write_text("example.com\n", encoding="utf-8")
+            first = authorization_fingerprint(engagement, state, scope)
+            engagement["allowed_assets"] = ["api.example.com"]
+            second = authorization_fingerprint(engagement, state, scope)
+            self.assertNotEqual(first, second)
+            engagement["allowed_assets"] = ["example.com"]
+            scope.write_text("api.example.com\n", encoding="utf-8")
+            third = authorization_fingerprint(engagement, state, scope)
+            self.assertNotEqual(first, third)
+
+    def test_resume_retries_checkpoint_with_tool_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "stages").mkdir()
+            (root / "stages" / "x.json").write_text(json.dumps([{
+                "agent": "scan", "tool": "fake", "status": "error",
+                "seconds": 1.0, "output": "", "note": "failed", "command": [],
+            }]), encoding="utf-8")
+            calls = []
+            result = stage(
+                {"out": root, "resume": True},
+                "x",
+                lambda ctx: (calls.append(True) or [Step("scan", "fake", "ok", 0.0)]),
+            )
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(result[0].status, "ok")
 
     def test_wrapper_forwards_flags(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

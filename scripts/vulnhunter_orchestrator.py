@@ -600,6 +600,40 @@ def config_fingerprint(ctx: dict) -> str:
     return hashlib.sha256(json.dumps(stable, sort_keys=True).encode()).hexdigest()
 
 
+def authorization_fingerprint(
+    engagement: dict, state: dict, scope_file: Path | None
+) -> str:
+    projection = {
+        "engagement": {
+            key: engagement.get(key)
+            for key in (
+                "authorization_status", "permission_mode", "allowed_assets",
+                "excluded_assets", "allowed_methods", "prohibited_methods",
+                "testing_window", "rate_limits", "stop_conditions",
+            )
+        },
+        "p0_status": ((state.get("phases") or {}).get("P0") or {}).get("status"),
+        "scope_file_sha256": (
+            hashlib.sha256(scope_file.read_bytes()).hexdigest()
+            if scope_file and scope_file.is_file() else None
+        ),
+    }
+    encoded = json.dumps(projection, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def checkpoint_rows_reusable(rows: object) -> list[Step] | None:
+    if not isinstance(rows, list):
+        return None
+    try:
+        parsed = [Step(**row) for row in rows]
+    except (TypeError, ValueError):
+        return None
+    if any(item.status in {"error", "timeout"} for item in parsed):
+        return None
+    return parsed
+
+
 @contextmanager
 def run_lock(out: Path):
     """Hold an exclusive process lock for the entire run directory lifecycle.
@@ -646,7 +680,9 @@ def stage(ctx: dict, name: str, function: Callable[[dict], list[Step]]) -> list[
     if ctx["resume"] and stage_file.exists():
         try:
             rows = json.loads(stage_file.read_text(encoding="utf-8"))
-            return [Step(**row) for row in rows]
+            reusable = checkpoint_rows_reusable(rows)
+            if reusable is not None:
+                return reusable
         except (json.JSONDecodeError, TypeError):
             pass
     result = function(ctx)
@@ -755,6 +791,9 @@ def main() -> int:
         "state": state,
         "started": utc_now(),
     }
+    ctx["authorization_fingerprint"] = authorization_fingerprint(
+        engagement or {}, state or {}, args.scope
+    )
     fingerprint = config_fingerprint(ctx)
     config_path = out / "run-config.json"
     config_record = {
