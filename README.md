@@ -1,9 +1,10 @@
-# VulnHunter Superworkflow (VHS)
+# Vulnhunter Superworkflow: Lazy Load Version
 
-VulnHunter Superworkflow is a fail-closed, evidence-driven workflow for
-**authorized** web, API, mobile, cloud, and Web3 security assessments. It turns
-an approved engagement into a structured P0–P6 process: authorization, threat
-modeling, surface mapping, controlled testing, validation, triage, and reporting.
+Vulnhunter Superworkflow: Lazy Load Version (VHS-LLV) is a fail-closed,
+evidence-driven workflow for **authorized** web, API, mobile, cloud, and Web3
+security assessments. It turns an approved engagement into a structured P0–P6
+process: authorization, threat modeling, surface mapping, controlled testing,
+validation, triage, and reporting.
 
 This repository is designed to help researchers keep scope, safety controls, and
 evidence attached to every assessment. It is not a scanner for arbitrary targets.
@@ -16,17 +17,16 @@ into your skills tree so Hermes can load it automatically.
 **Option A — Hermes CLI (recommended):**
 
 ```bash
-hermes skills install tomzsh/Vulnhunter-Superworkflow --category security --name vhs
+hermes skills install tomzsh/VHS-LLV --category security --name vhs
 ```
 
 This clones the repo, runs a safety scan, and drops it in the right place. Use
-`hermes skills inspect tomzsh/Vulnhunter-Superworkflow` first to preview without
-installing.
+`hermes skills inspect tomzsh/VHS-LLV` first to preview without installing.
 
 **Option B — clone straight into the skills directory:**
 
 ```bash
-git clone https://github.com/tomzsh/Vulnhunter-Superworkflow.git \
+git clone https://github.com/tomzsh/VHS-LLV.git \
   ~/.hermes/skills/security/vhs
 ```
 
@@ -34,7 +34,7 @@ The folder name (`vhs`) becomes the skill name. Verify the install:
 
 ```bash
 cd ~/.hermes/skills/security/vhs
-python3 -m unittest discover -s tests -v        # 65 offline tests
+python3 -m unittest discover -s tests -v        # 69 offline tests
 python3 -m py_compile scripts/*.py
 python3 scripts/check_tools.py --profile scanner-safe --verify   # optional-tool audit
 ```
@@ -58,8 +58,9 @@ create an engagement and pass the P0 authorization gate.
 
 ## Progressive reference loading
 
-`scripts/context_slice.py` is a standard-library, read-only helper for reviewing
-large Markdown references without changing their content or accessing the
+`VHS-LLV` uses lazy loading for large references: the standard-library,
+read-only `scripts/context_slice.py` helper inspects headings first and loads
+only the relevant sections, without changing source content or accessing the
 network. Inspect a selected playbook first, then request matching sections:
 
 ```bash
@@ -70,9 +71,11 @@ python3 scripts/context_slice.py --file references/attack-playbooks/rce.md \
 
 Copy complete heading text from `--outline`; partial substring terms are not
 accepted in safe playbook mode. The safe route retains parent methodology,
-includes the playbook's safety section, and refuses evasion/post-exploitation
-categories. `--full` prints the source exactly for P4 exact validation. The
-helper ignores heading-like lines inside fenced code blocks.
+automatically includes the playbook's compliance/safety section, and fails
+closed on bypass/evasion, DoS, lateral-movement, persistence, or
+post-exploitation categories. `--full` prints the source byte-for-byte for P4
+exact validation. The helper ignores heading-like lines inside fenced code
+blocks.
 
 ## Safety and authorization
 
@@ -102,6 +105,46 @@ exposed, or a third party could be impacted.
   and scanning tools
 - Offline tests, including fake-tool integration tests that never contact a real
   target
+
+## Lazy-load and workflow hardening
+
+The workflow keeps the active context small while preserving assessment
+coverage. The router loads the operating contract, current phase, engagement
+state, and only the target module/playbook sections needed for the selected
+surface. It does not load every playbook by default.
+
+Additional fail-closed safeguards include:
+
+- authorization-aware checkpoint resume; stale, mismatched, or unsafe resumes
+  are rejected;
+- scope revalidation between discovery and downstream scanners, including
+  Dalfox;
+- API, GraphQL, and SAST/code-graph preflight checks that stop before tool
+  execution when prerequisites or scope are not valid;
+- deny and redirect safety rules with explicit precedence;
+- unique evidence artifact names plus locked, atomic ledger writes; and
+- cached, truthful optional-tool readiness checks so unavailable tools are not
+  advertised as usable during the same run.
+
+## Per-engagement memory isolation
+
+Every engagement has its own memory on disk under its engagement directory.
+Target-specific scope, assets, accounts, hypotheses, test state, evidence, and
+findings are never written to global Hermes memory or mem0, and are not mixed
+with another project.
+
+Refresh or read the isolated rollup with:
+
+```bash
+python3 scripts/rollup_memory.py ./engagement --write
+python3 scripts/rollup_memory.py ./engagement
+python3 scripts/rollup_memory.py ./engagement --json
+```
+
+Resume reads the engagement directory and its `memory-rollup.md`, not chat
+history or global memory. Only genuinely reusable, target-independent lessons
+or tool preferences may be stored globally. Deleting an engagement directory
+removes its engagement memory.
 
 ## Requirements
 
@@ -285,7 +328,7 @@ The test suite is offline and uses fake binaries for scanner integration tests.
 ```bash
 python3 -m unittest discover -s tests -v
 python3 -m py_compile scripts/*.py
-bash -n scripts/vulnhunter-tools.sh
+for f in scripts/*.sh; do bash -n "$f" || exit 1; done
 ```
 
 ## GitHub publishing checklist
