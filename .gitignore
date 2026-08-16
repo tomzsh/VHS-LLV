@@ -39,3 +39,6 @@ __pycache__/
 .DS_Store
 *.swp
 *~
+
+# Superpowers implementation worktrees
+.worktrees/
