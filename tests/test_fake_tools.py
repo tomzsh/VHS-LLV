@@ -57,7 +57,12 @@ for host in open(path, encoding='utf-8'):
                 "arjun": """#!/usr/bin/env python3
 import json, sys
 path = sys.argv[sys.argv.index('-oJ') + 1]
-open(path, 'w', encoding='utf-8').write(json.dumps({'results': []}))
+open(path, 'w', encoding='utf-8').write(json.dumps({
+    'results': [
+        {'url': 'https://api.example.com/discovered?x=1'},
+        {'url': 'https://evil.test/discovered?x=1'},
+    ]
+}))
 """,
                 "nuclei": """#!/usr/bin/env python3
 import json, sys
@@ -67,8 +72,11 @@ open(path, 'w', encoding='utf-8').write(json.dumps(finding) + '\\n')
 """,
                 "dalfox": """#!/usr/bin/env python3
 import sys
-path = sys.argv[sys.argv.index('--output') + 1]
-open(path, 'w', encoding='utf-8').write('fake-poc\n')
+from pathlib import Path
+candidates = Path(sys.argv[sys.argv.index('file') + 1])
+output = Path(sys.argv[sys.argv.index('--output') + 1])
+output.parent.joinpath('dalfox-input.txt').write_text(candidates.read_text(encoding='utf-8'), encoding='utf-8')
+output.write_text('fake-poc\\n', encoding='utf-8')
 """,
                 # Stubs for tools that exist on a fully-provisioned host. Without
                 # these, PATH falls through to the real binaries (waymore,
@@ -121,6 +129,12 @@ open(path, 'w', encoding='utf-8').write('fake-poc\n')
             scoped_urls = (out / "agents" / "crawl" / "urls_all.txt").read_text(encoding="utf-8")
             self.assertIn("api.example.com", scoped_urls)
             self.assertNotIn("evil.test", scoped_urls)
+            discovered = (out / "agents" / "discovery" / "urls_discovered.txt").read_text(encoding="utf-8")
+            self.assertIn("https://api.example.com/discovered?x=1", discovered)
+            self.assertNotIn("evil.test", discovered)
+            xss_input = (out / "agents" / "scan" / "dalfox-input.txt").read_text(encoding="utf-8")
+            self.assertIn("https://api.example.com/discovered?x=1", xss_input)
+            self.assertNotIn("evil.test", xss_input)
 
             manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
             manifest_text = json.dumps(manifest)

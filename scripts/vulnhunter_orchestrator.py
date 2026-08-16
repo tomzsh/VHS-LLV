@@ -206,6 +206,46 @@ def filter_urls(src: Path, dst: Path, policy: ScopePolicy) -> int:
     return len(urls)
 
 
+def extract_json_urls(value: object) -> set[str]:
+    """Return HTTP(S) URLs found recursively in a JSON-compatible value."""
+    if isinstance(value, dict):
+        urls: set[str] = set()
+        for child in value.values():
+            urls.update(extract_json_urls(child))
+        return urls
+    if isinstance(value, list):
+        urls: set[str] = set()
+        for child in value:
+            urls.update(extract_json_urls(child))
+        return urls
+    if isinstance(value, str):
+        candidate = value.strip()
+        parsed = urlsplit(candidate)
+        if parsed.scheme.lower() in {"http", "https"} and parsed.hostname:
+            return {candidate}
+    return set()
+
+
+def collect_discovery_urls(directory: Path, policy: ScopePolicy, output: Path) -> int:
+    """Write sorted, normalized, in-scope URLs emitted by active discovery tools."""
+    urls: set[str] = set()
+    sources = [directory / "arjun.json", *sorted(directory.glob("ffuf_*.json"))]
+    for source in sources:
+        if not source.exists():
+            continue
+        try:
+            discovered = extract_json_urls(json.loads(source.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for value in discovered:
+            if not policy.url_allowed(value):
+                continue
+            parsed = urlsplit(value)
+            urls.add(urlunsplit((parsed.scheme.lower(), parsed.netloc, parsed.path or "/", parsed.query, "")))
+    atomic_write(output, "".join(f"{url}\n" for url in sorted(urls)))
+    return len(urls)
+
+
 def method_set(engagement: dict, key: str) -> set[str]:
     values = engagement.get(key) or []
     return {str(item).strip().lower().replace("-", "_") for item in values if str(item).strip()}
@@ -416,7 +456,7 @@ def normalize_discovery(ctx: dict) -> list[Step]:
 
 
 def active_discovery(ctx: dict) -> list[Step]:
-    out = ctx["out"]
+    out, policy = ctx["out"], ctx["policy"]
     directory = out / "agents" / "discovery"
     live = out / "agents" / "recon" / "live_urls.txt"
     steps: list[Step] = []
@@ -441,6 +481,9 @@ def active_discovery(ctx: dict) -> list[Step]:
             step = run_command("discovery", f"ffuf[{index}]", command, timeout=ctx["agent_timeout"])
             step.output = str(output)
             steps.append(step)
+    output = directory / "urls_discovered.txt"
+    count = collect_discovery_urls(directory, policy, output)
+    steps.append(Step("discovery", "scope-guard-discovered-urls", "ok", 0, str(output), f"{count} URL(s) allowed"))
     return steps
 
 
@@ -502,14 +545,22 @@ def nuclei_scan(ctx: dict) -> list[Step]:
 
 
 def dalfox_scan(ctx: dict) -> list[Step]:
-    out = ctx["out"]
+    out, policy = ctx["out"], ctx["policy"]
     directory = out / "agents" / "scan"
-    urls = out / "agents" / "discovery" / "urls_normalized.txt"
-    if not command_exists("dalfox") or not urls.exists() or not urls.stat().st_size:
-        return [Step("scan", "dalfox", "skipped", 0, "", "dalfox unavailable or no normalized scoped URLs")]
+    normalized = out / "agents" / "discovery" / "urls_normalized.txt"
+    discovered = out / "agents" / "discovery" / "urls_discovered.txt"
     candidates = directory / "xss_candidates.txt"
-    values = [line for line in urls.read_text(encoding="utf-8", errors="ignore").splitlines() if "=" in line]
-    atomic_write(candidates, "".join(f"{url}\n" for url in values))
+    values: set[str] = set()
+    for source in (normalized, discovered):
+        if not source.exists():
+            continue
+        for line in source.read_text(encoding="utf-8", errors="ignore").splitlines():
+            value = line.strip()
+            if "=" in value and policy.url_allowed(value):
+                values.add(value)
+    atomic_write(candidates, "".join(f"{url}\n" for url in sorted(values)))
+    if not command_exists("dalfox"):
+        return [Step("scan", "dalfox", "skipped", 0, str(candidates), "dalfox unavailable")]
     if not values:
         return [Step("scan", "dalfox", "skipped", 0, str(candidates), "no parameterized URLs")]
     output = directory / "dalfox.txt"
