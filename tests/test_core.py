@@ -229,6 +229,57 @@ class EvidenceCaptureTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(ledger.read_text(encoding="utf-8"), "wrong,header\nkeep,this\n")
 
+    def test_raw_collision_preserves_preexisting_artifact_and_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.create_evidence_ledger(root)
+            ledger = root / "evidence-ledger.csv"
+            ledger_before = ledger.read_bytes()
+            source = root / "source" / "response.txt"
+            source.parent.mkdir()
+            source.write_bytes(b"new raw evidence")
+            collision = root / "evidence" / "raw" / "EV-001-response.txt"
+            collision.write_bytes(b"preserve raw artifact")
+
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPTS / "evidence_capture.py"), str(root),
+                    "--evidence-id", "EV-001", "--asset", "AST-001",
+                    "--observation", "test", "--file", str(source),
+                ],
+                text=True, capture_output=True, check=False, timeout=30,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(collision.read_bytes(), b"preserve raw artifact")
+            self.assertEqual(ledger.read_bytes(), ledger_before)
+
+    def test_redacted_collision_preserves_preexisting_artifact_and_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.create_evidence_ledger(root)
+            ledger = root / "evidence-ledger.csv"
+            ledger_before = ledger.read_bytes()
+            source = root / "source" / "response.txt"
+            source.parent.mkdir()
+            source.write_bytes(b"new raw evidence")
+            collision = root / "evidence" / "redacted" / "EV-001-response.txt"
+            collision.write_bytes(b"preserve redacted artifact")
+
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPTS / "evidence_capture.py"), str(root),
+                    "--evidence-id", "EV-001", "--asset", "AST-001",
+                    "--observation", "test", "--file", str(source),
+                ],
+                text=True, capture_output=True, check=False, timeout=30,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(collision.read_bytes(), b"preserve redacted artifact")
+            self.assertFalse((root / "evidence" / "raw" / "EV-001-response.txt").exists())
+            self.assertEqual(ledger.read_bytes(), ledger_before)
+
 
 class OrchestratorTests(unittest.TestCase):
     def run_orchestrator(self, *args: str) -> subprocess.CompletedProcess[str]:

@@ -132,20 +132,26 @@ def append_ledger(root: Path, row: list[str]) -> None:
 
 
 def copy_exclusive(source: Path, destination: Path) -> None:
+    created = False
     try:
         with source.open("rb") as src, destination.open("xb") as dst:
+            created = True
             shutil.copyfileobj(src, dst)
     except BaseException:
-        destination.unlink(missing_ok=True)
+        if created:
+            destination.unlink(missing_ok=True)
         raise
 
 
 def write_stdin_exclusive(destination: Path) -> None:
+    created = False
     try:
         with destination.open("xb") as dst:
+            created = True
             shutil.copyfileobj(sys.stdin.buffer, dst)
     except BaseException:
-        destination.unlink(missing_ok=True)
+        if created:
+            destination.unlink(missing_ok=True)
         raise
 
 
