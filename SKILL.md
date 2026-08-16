@@ -97,8 +97,9 @@ Resolve paths relative to this `SKILL.md`, then read:
    ```
 
    Safe playbook mode requires exact outline-derived headings, automatically
-   includes the playbook's compliance/safety section, and refuses evasion or
-   post-exploitation categories. Use `--full` for P4 exact validation. The
+   includes the playbook's compliance/safety section, and refuses bypass/evasion,
+   exploitation/lateral-movement, persistence, DoS, and post-exploitation
+   categories. Use `--full` for P4 exact validation. The
    helper is read-only and does not replace the full imported playbook.
 2. `references/operating-contract.md`, `references/index.md`, and the current
    phase reference.
@@ -255,15 +256,15 @@ It cannot authorize an asset absent from `engagement.json`.
 | P1-research | pull disclosed hacktivity/writeups for the target stack | `research-stage.md` | `research/` digest + ledger |
 | P2 | map authorized surfaces | `p2-recon.md`, `taxonomy-rating.md` | asset and surface inventories |
 | P2-mobile | static-analyze an in-scope Android app | `module-android-apk.md` (via `apk_recon.sh`) | decompile + exported/secret/endpoint report |
-| P3 | design controlled tests | `p3-test-design.md`, `attack-playbooks/00-index.md`, `critical-review-loop.md` when sharpening a hypothesis | test matrix |
+| P3 | design controlled tests | `p3-test-design.md`, `attack-playbooks/00-index.md`, `critical-review-loop.md` when sharpening a hypothesis, `dig-deeper-chain.md` when a credible signal needs a follow-up hop | test matrix + optional dig-deeper chain |
 
 P3 gate now **enforces playbook grounding**: `gate_check.py --phase P3` fails until
 `--mark-playbooks` has set `state.json playbooks_loaded=true` (run it after reading
 `attack-playbooks/00-index.md`), and every `test-matrix.csv` row must cite a playbook in
 its `notes` column (e.g. `notes='playbook: sqli'` or `attack-playbooks/<name>.md`).
 
-| P4 | validate with controls | `p4-validation.md`, `evidence-standard.md`, `critical-review-loop.md` | evidence ledger + critical review |
-| P5 | root cause and severity | `p5-triage.md`, `taxonomy-rating.md`, `bountyforge-judging.md`, `bountyforge-cvss.md`, `critical-review-loop.md` | findings index + critical review |
+| P4 | validate with controls | `p4-validation.md`, `evidence-standard.md`, `critical-review-loop.md`, `dig-deeper-chain.md` or `pivot-ladder.md` only when the corresponding ledger is active | evidence ledger + optional chain/ladder |
+| P5 | root cause and severity | `p5-triage.md`, `taxonomy-rating.md`, `bountyforge-judging.md`, `bountyforge-cvss.md`, `critical-review-loop.md`, `pivot-ladder.md` when evaluating a cross-asset path | findings index + optional ladder |
 
 P5 chaining (composite A→B→C severity) is available once findings exist:
 
@@ -283,6 +284,20 @@ P5 requires every finding to link to a `retain` review. The loop records the
 claim, evidence, alternative explanation, disconfirming test, control,
 scope/impact, uncertainty, and decision. It is not a reason to repeat prose
 for every reconnaissance result or to bypass authorization and scope gates.
+
+## Bounded exploration ladders
+
+Use `references/dig-deeper-chain.md` only when a credible P3 signal needs a
+controlled follow-up hypothesis, and use `references/pivot-ladder.md` only when
+P4/P5 is evaluating an explicitly authorized path between known in-scope
+assets. Active means a ledger has at least one validated row.
+At P4 load neither ladder reference by default; load exactly one ladder
+reference only after its corresponding ledger has active work. Load both only
+when both ledgers have independently justified active rows. Both ledgers are
+optional, default to three hops, require per-hop test, evidence, critical
+review, and stop conditions, and never authorize additional traffic, privilege
+use, credential collection, or scope expansion. `kill-chain` remains the
+separate P5 composite-finding analysis.
 
 ## GraphQL and Code Graph routing
 
@@ -385,6 +400,10 @@ full descriptions into every engagement.
   deliverables from redacted ledgers at P6 via the `officecli` binary.
 - `references/critical-review-loop.md` — bounded P3–P5 adversarial review for
   claims, alternatives, disconfirmation, controls, scope/impact, and uncertainty.
+- `references/dig-deeper-chain.md` — conditional P3–P4 follow-up investigation
+  with a bounded hop count and stop conditions.
+- `references/pivot-ladder.md` — conditional P4–P5 authorized cross-asset path
+  with scope and rollback checks.
 - `references/bountyforge-judging.md` — 4-gate finding evaluation (Refutation
   → Reachability → Trigger → Impact) + severity adjustment + LEAD promotion,
   ported from BountyForge (P5).

@@ -197,6 +197,8 @@ def main() -> int:
         "| `test-matrix.csv` | Planned tests: baseline, mutation, negative control, cleanup | P3-P4 |\n"
         "| `evidence-ledger.csv` | Provenance + SHA-256 + redaction status per evidence item | P4 |\n"
         "| `critical-review.csv` | Claim, alternative, disconfirming test, controls, uncertainty, decision | P4-P5 |\n"
+        "| `dig-deeper-chain.csv` | Bounded follow-up hypotheses and controlled investigation hops | P3-P4 |\n"
+        "| `pivot-ladder.csv` | Scope-authorized cross-asset test hops with rollback | P4-P5 |\n"
         "| `findings-index.csv` | Root-caused, evidence-backed findings | P5 |\n"
         "| `evidence/raw/` | **Unredacted** evidence — never commit, never share directly | P4 |\n"
         "| `evidence/redacted/` | Sanitized copies safe for the report/disclosure | P6 |\n"

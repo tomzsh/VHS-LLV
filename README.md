@@ -34,7 +34,7 @@ The folder name (`vhs`) becomes the skill name. Verify the install:
 
 ```bash
 cd ~/.hermes/skills/security/vhs
-python3 -m unittest discover -s tests -v        # 78 offline tests
+python3 -m unittest discover -s tests -v        # 88 offline tests
 python3 -m py_compile scripts/*.py
 python3 scripts/check_tools.py --profile scanner-safe --verify   # optional-tool audit
 ```
@@ -107,6 +107,8 @@ exposed, or a third party could be impacted.
   target
 - `critical-review.csv` ledger and P4/P5 gates for bounded alternative,
   disconfirmation, control, scope/impact, uncertainty, and decision review
+- Optional `dig-deeper-chain.csv` and `pivot-ladder.csv` ledgers with a default
+  three-hop bound, evidence/review gates, and fail-closed in-scope asset checks
 
 ## Lazy-load and workflow hardening
 
@@ -127,6 +129,19 @@ Additional fail-closed safeguards include:
 - unique evidence artifact names plus locked, atomic ledger writes; and
 - cached, truthful optional-tool readiness checks so unavailable tools are not
   advertised as usable during the same run.
+
+### Bounded exploration ladders
+
+`dig-deeper-chain.csv` is a conditional P3–P4 follow-up path for a credible
+signal that needs another controlled test. `pivot-ladder.csv` is a conditional
+P4–P5 path between known `in_scope` assets. Active means a ledger has at least
+one validated row. At P4 load neither ladder reference by
+default; load exactly one only after its corresponding ledger has active work,
+and load both only when both ledgers have independently justified work. Both
+are capped at three hops by default and require a test, evidence, critical
+review, and stop conditions per finalized hop. They never authorize extra
+traffic or expand scope. `kill-chain` remains the separate P5 composite-finding
+analysis.
 
 ### Optional Superpowers-derived engineering adapter
 

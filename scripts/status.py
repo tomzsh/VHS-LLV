@@ -56,7 +56,8 @@ def main() -> int:
         "ledgers": {},
     }
     for name in ("asset-inventory.csv", "surface-inventory.csv", "hypothesis-ledger.csv",
-                 "test-matrix.csv", "evidence-ledger.csv", "critical-review.csv", "findings-index.csv"):
+                 "test-matrix.csv", "evidence-ledger.csv", "critical-review.csv",
+                 "dig-deeper-chain.csv", "pivot-ladder.csv", "findings-index.csv"):
         summary["ledgers"][name] = dict(read_csv_counts(root, name))
 
     if args.json:
@@ -75,7 +76,9 @@ def main() -> int:
     for name, counts in summary["ledgers"].items():
         if not counts:
             continue
-        short = name.replace("-inventory.csv", "").replace("-ledger.csv", "").replace("-matrix.csv", "").replace("-index.csv", "").replace(".csv", "")
+        short = (name.replace("-inventory.csv", "").replace("-ledger.csv", "")
+                 .replace("-matrix.csv", "").replace("-index.csv", "")
+                 .replace("-chain.csv", "").replace(".csv", ""))
         parts = [f"{v} {k.split('=', 1)[-1]}" for k, v in sorted(counts.items())]
         print(f"{short:16s} {', '.join(parts)}")
     return 0

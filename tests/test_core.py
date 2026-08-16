@@ -272,6 +272,276 @@ class CriticalReviewLoopTests(unittest.TestCase):
             self.assertEqual(p5_errors, [])
 
 
+class DigDeeperAndPivotLadderTests(unittest.TestCase):
+    DIG_FIELDS = [
+        "chain_id", "step_no", "test_id", "hypothesis_id", "question",
+        "alternative_explanation", "disconfirming_test", "negative_control",
+        "scope_impact", "evidence_ids", "next_test_id", "status", "stop_reason",
+        "uncertainty", "review_id",
+    ]
+    PIVOT_FIELDS = [
+        "ladder_id", "step_no", "test_id", "from_asset_id", "to_asset_id",
+        "actor_or_identity", "authorization_basis", "precondition", "action",
+        "expected_control", "evidence_ids", "status", "rollback", "impact",
+        "stop_reason", "review_id",
+    ]
+
+    def _write_csv(self, root: Path, name: str, rows: list[dict[str, str]]) -> None:
+        fields = {
+            "dig-deeper-chain.csv": self.DIG_FIELDS,
+            "pivot-ladder.csv": self.PIVOT_FIELDS,
+        }.get(name)
+        if fields is None:
+            fields = LEDGER_SCHEMAS[name]
+        with (root / name).open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(rows)
+
+    def _base(self, root: Path, count: int = 1, *, out_of_scope_destination: bool = False) -> None:
+        root.mkdir()
+        tests = []
+        evidence = []
+        reviews = []
+        for number in range(1, count + 1):
+            test_id = f"TST-{number:03d}"
+            hypothesis_id = f"HYP-{number:03d}"
+            evidence_id = f"EV-{number:03d}"
+            test_asset_id = "AST-002" if count >= 3 and not out_of_scope_destination else "AST-001"
+            tests.append({
+                "test_id": test_id, "hypothesis_id": hypothesis_id, "asset_id": test_asset_id,
+                "surface_id": "SUR-001", "baseline": "baseline", "mutation": "mutation",
+                "expected_result": "deny", "negative_control": "control", "evidence_plan": "plan",
+                "cleanup": "cleanup", "risk": "low", "permission_mode": "ACTIVE_SAFE",
+                "status": "confirmed", "evidence_ids": evidence_id, "notes": "playbook: sqli",
+            })
+            evidence.append({
+                "evidence_id": evidence_id, "captured_at_utc": "2026-08-16T00:00:00+00:00",
+                "hypothesis_id": hypothesis_id, "test_id": test_id, "finding_id": "",
+                "asset_id": test_asset_id, "path": f"evidence/redacted/{evidence_id}.txt",
+                "sha256": "a" * 64, "sensitivity": "low", "redaction_status": "reviewed",
+                "observation": "bounded observation", "cleanup_status": "complete",
+            })
+            reviews.append({
+                "review_id": f"REV-{number:03d}", "hypothesis_id": hypothesis_id,
+                "test_id": test_id, "finding_id": "", "claim": "bounded claim",
+                "evidence_ids": evidence_id, "alternative_explanation": "benign cache",
+                "disconfirming_test": "repeat with control", "negative_control": "control held",
+                "scope_impact": "authorized asset only", "uncertainty": "low", "decision": "retain",
+                "reviewer": "operator", "reviewed_at_utc": "2026-08-16T00:00:00+00:00",
+            })
+        self._write_csv(root, "test-matrix.csv", tests)
+        self._write_csv(root, "evidence-ledger.csv", evidence)
+        self._write_csv(root, "critical-review.csv", reviews)
+        self._write_csv(root, "asset-inventory.csv", [
+            {"asset_id": "AST-001", "asset": "app.example.com", "type": "web", "environment": "test", "owner": "owner", "scope_status": "in_scope", "source": "manual", "notes": ""},
+            {"asset_id": "AST-002", "asset": "api.example.com", "type": "api", "environment": "test", "owner": "owner", "scope_status": "out_of_scope" if out_of_scope_destination else "in_scope", "source": "manual", "notes": ""},
+        ])
+        allowed_assets = ["app.example.com"]
+        if not out_of_scope_destination:
+            allowed_assets.append("api.example.com")
+        (root / "engagement.json").write_text(
+            json.dumps({"primary_target": "example.com", "allowed_assets": allowed_assets}),
+            encoding="utf-8",
+        )
+
+    def _complete_ladders(self, root: Path) -> None:
+        self._base(root, count=3)
+        dig_rows = []
+        pivot_rows = []
+        for number in range(1, 4):
+            test_id = f"TST-{number:03d}"
+            hypothesis_id = f"HYP-{number:03d}"
+            evidence_id = f"EV-{number:03d}"
+            review_id = f"REV-{number:03d}"
+            dig_rows.append({
+                "chain_id": "CHAIN-D-001", "step_no": str(number), "test_id": test_id,
+                "hypothesis_id": hypothesis_id, "question": "does the next control fail?",
+                "alternative_explanation": "benign cache behavior", "disconfirming_test": "use isolated control",
+                "negative_control": "control remains denied", "scope_impact": "same authorized app",
+                "evidence_ids": evidence_id, "next_test_id": f"TST-{number + 1:03d}" if number < 3 else "",
+                "status": "confirmed", "stop_reason": "depth bound reached" if number == 3 else "",
+                "uncertainty": "low", "review_id": review_id,
+            })
+            pivot_rows.append({
+                "ladder_id": "LADDER-P-001", "step_no": str(number), "test_id": test_id,
+                "from_asset_id": "AST-001", "to_asset_id": "AST-002",
+                "actor_or_identity": "approved-test-identity", "authorization_basis": "engagement.json scope",
+                "precondition": "explicit test identity active", "action": "bounded request",
+                "expected_control": "destination remains isolated", "evidence_ids": evidence_id,
+                "status": "confirmed", "rollback": "revoke test session", "impact": "no third-party impact",
+                "stop_reason": "depth bound reached" if number == 3 else "", "review_id": review_id,
+            })
+        self._write_csv(root, "dig-deeper-chain.csv", dig_rows)
+        self._write_csv(root, "pivot-ladder.csv", pivot_rows)
+        (root / "engagement.json").write_text(
+            json.dumps({"primary_target": "example.com", "allowed_assets": ["app.example.com", "api.example.com"]}),
+            encoding="utf-8",
+        )
+
+    def test_new_engagement_bootstraps_chain_ledgers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / "new_engagement.py"), str(root), "--title", "Ladder test", "--target", "example.com"],
+                text=True, capture_output=True, timeout=30, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((root / "dig-deeper-chain.csv").exists())
+            self.assertTrue((root / "pivot-ladder.csv").exists())
+
+    def test_chain_references_are_conditionally_routed(self) -> None:
+        skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        router = (SKILL / "references" / "context-router.md").read_text(encoding="utf-8")
+        self.assertTrue((SKILL / "references" / "dig-deeper-chain.md").exists())
+        self.assertTrue((SKILL / "references" / "pivot-ladder.md").exists())
+        self.assertIn("dig-deeper-chain.md", skill)
+        self.assertIn("pivot-ladder.md", skill)
+        self.assertIn("active means a ledger has at least one validated row", skill.casefold())
+        self.assertRegex(skill.casefold(), r"load exactly one ladder\s+reference")
+        self.assertRegex(router, r"P3.*dig-deeper-chain\.md")
+        self.assertRegex(router, r"P4.*pivot-ladder\.md")
+
+    def test_p4_rejects_dig_deeper_chain_over_default_depth(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            self._base(root)
+            self._write_csv(root, "dig-deeper-chain.csv", [
+                {
+                    "chain_id": "CHAIN-D-001", "step_no": str(number), "test_id": "TST-001",
+                    "hypothesis_id": "HYP-001", "question": "next question",
+                    "alternative_explanation": "benign cause", "disconfirming_test": "control test",
+                    "negative_control": "control held", "scope_impact": "same asset", "evidence_ids": "EV-001",
+                    "next_test_id": "", "status": "confirmed", "stop_reason": "",
+                    "uncertainty": "low", "review_id": "REV-001",
+                }
+                for number in range(1, 5)
+            ])
+            errors: list[str] = []
+            p4(root, errors)
+            self.assertTrue(any("maximum" in error or "depth" in error for error in errors), errors)
+
+    def test_p4_rejects_pivot_to_out_of_scope_asset(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            self._base(root, out_of_scope_destination=True)
+            self._write_csv(root, "pivot-ladder.csv", [{
+                "ladder_id": "LADDER-P-001", "step_no": "1", "test_id": "TST-001",
+                "from_asset_id": "AST-001", "to_asset_id": "AST-002", "actor_or_identity": "test-identity",
+                "authorization_basis": "engagement.json scope", "precondition": "approved session",
+                "action": "bounded request", "expected_control": "deny", "evidence_ids": "EV-001",
+                "status": "confirmed", "rollback": "revoke session", "impact": "bounded",
+                "stop_reason": "", "review_id": "REV-001",
+            }])
+            errors: list[str] = []
+            p4(root, errors)
+            self.assertTrue(any("in_scope" in error or "pivot-ladder" in error for error in errors), errors)
+
+    def test_p4_rejects_dig_deeper_chain_with_broken_next_hop(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            self._base(root, count=3)
+            self._write_csv(root, "dig-deeper-chain.csv", [
+                {
+                    "chain_id": "CHAIN-D-001", "step_no": str(number), "test_id": f"TST-{number:03d}",
+                    "hypothesis_id": f"HYP-{number:03d}", "question": "next question",
+                    "alternative_explanation": "benign cause", "disconfirming_test": "control test",
+                    "negative_control": "control held", "scope_impact": "same asset", "evidence_ids": f"EV-{number:03d}",
+                    "next_test_id": f"TST-{number + 1:03d}" if number == 1 else "",
+                    "status": "confirmed", "stop_reason": "", "uncertainty": "low", "review_id": f"REV-{number:03d}",
+                }
+                for number in (1, 2, 3)
+            ])
+            errors: list[str] = []
+            p4(root, errors)
+            self.assertTrue(any("next_test_id" in error or "terminal" in error for error in errors), errors)
+
+    def test_p4_rejects_chain_reuse_across_chain_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            self._base(root, count=2)
+            self._write_csv(root, "dig-deeper-chain.csv", [
+                {
+                    "chain_id": chain_id, "step_no": "1", "test_id": "TST-001", "hypothesis_id": "HYP-001",
+                    "question": "same signal", "alternative_explanation": "benign cause",
+                    "disconfirming_test": "control test", "negative_control": "control held", "scope_impact": "same asset",
+                    "evidence_ids": "EV-001", "next_test_id": "", "status": "confirmed", "stop_reason": "",
+                    "uncertainty": "low", "review_id": "REV-001",
+                }
+                for chain_id in ("CHAIN-D-001", "CHAIN-D-002")
+            ])
+            errors: list[str] = []
+            p4(root, errors)
+            self.assertTrue(any("reuse" in error or "multiple chain" in error for error in errors), errors)
+
+    def test_p4_rejects_pivot_test_target_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            self._base(root)
+            self._write_csv(root, "pivot-ladder.csv", [{
+                "ladder_id": "LADDER-P-001", "step_no": "1", "test_id": "TST-001",
+                "from_asset_id": "AST-001", "to_asset_id": "AST-002", "actor_or_identity": "test-identity",
+                "authorization_basis": "engagement.json scope", "precondition": "approved session",
+                "action": "bounded request", "expected_control": "deny", "evidence_ids": "EV-001",
+                "status": "confirmed", "rollback": "revoke session", "impact": "bounded",
+                "stop_reason": "", "review_id": "REV-001",
+            }])
+            errors: list[str] = []
+            p4(root, errors)
+            self.assertTrue(any("target" in error or "to_asset_id" in error for error in errors), errors)
+
+    def test_p4_rejects_pivot_asset_not_allowed_by_engagement(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            self._base(root)
+            (root / "engagement.json").write_text(
+                json.dumps({"primary_target": "example.com", "allowed_assets": ["app.example.com"]}),
+                encoding="utf-8",
+            )
+            self._write_csv(root, "pivot-ladder.csv", [{
+                "ladder_id": "LADDER-P-001", "step_no": "1", "test_id": "TST-001",
+                "from_asset_id": "AST-001", "to_asset_id": "AST-002", "actor_or_identity": "test-identity",
+                "authorization_basis": "engagement.json scope", "precondition": "approved session",
+                "action": "bounded request", "expected_control": "deny", "evidence_ids": "EV-001",
+                "status": "confirmed", "rollback": "revoke session", "impact": "bounded",
+                "stop_reason": "", "review_id": "REV-001",
+            }])
+            errors: list[str] = []
+            p4(root, errors)
+            self.assertTrue(any("allowed_assets" in error or "ScopePolicy" in error for error in errors), errors)
+
+    def test_p4_rejects_confirmed_ladder_hop_without_review(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            self._base(root)
+            self._write_csv(root, "dig-deeper-chain.csv", [{
+                "chain_id": "CHAIN-D-001", "step_no": "1", "test_id": "TST-001",
+                "hypothesis_id": "HYP-001", "question": "next question", "alternative_explanation": "benign cause",
+                "disconfirming_test": "control test", "negative_control": "control held", "scope_impact": "same asset",
+                "evidence_ids": "EV-001", "next_test_id": "", "status": "confirmed", "stop_reason": "",
+                "uncertainty": "low", "review_id": "",
+            }])
+            errors: list[str] = []
+            p4(root, errors)
+            self.assertTrue(any("dig-deeper" in error or "review_id" in error for error in errors), errors)
+
+    def test_complete_three_hop_ladders_are_accepted_and_rolled_up(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            self._complete_ladders(root)
+            errors: list[str] = []
+            p4(root, errors)
+            self.assertEqual(errors, [])
+            rollup = subprocess.run(
+                [sys.executable, str(SCRIPTS / "rollup_memory.py"), str(root), "--json"],
+                text=True, capture_output=True, timeout=30, check=False,
+            )
+            self.assertEqual(rollup.returncode, 0, rollup.stderr)
+            payload = json.loads(rollup.stdout)
+            self.assertEqual(len(payload.get("dig_deeper_chains", [])), 3)
+            self.assertEqual(len(payload.get("pivot_ladders", [])), 3)
+
+
 class ContextSliceTests(unittest.TestCase):
     def test_context_slice_keeps_selected_section_and_nested_children(self) -> None:
         from context_slice import slice_sections

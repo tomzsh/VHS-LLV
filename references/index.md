@@ -9,6 +9,9 @@ playbook or reference.
 - `operating-contract.md`, `index.md`, and the current phase file.
 - `non-qualifying.md` before classifying a finding.
 - `evidence-standard.md` before P4/P5 evidence review.
+- `critical-review-loop.md` only for P3–P5 hypothesis, validation, or triage decisions.
+- `dig-deeper-chain.md` only for a credible P3–P4 follow-up investigation.
+- `pivot-ladder.md` only for an explicitly authorized P4–P5 cross-asset path.
 - `taxonomy-rating.md` from P1 onward when modeling or rating severity.
 - `attack-playbooks/00-index.md` from P3 onward.
 - `reporting-templates.md` and `officecli-reporting.md` only for P6 deliverables.
@@ -28,9 +31,9 @@ playbook or reference.
 | P0 | `p0-authorization.md` |
 | P1 | `p1-modeling.md` |
 | P2 | `p2-recon.md` |
-| P3 | `p3-test-design.md`, `attack-playbooks/00-index.md`, `module-index.md` (pick the module matching in-scope surface) |
-| P4 | `p4-validation.md`, `evidence-standard.md`, `attack-playbooks/<type>.md` (re-check before each round) |
-| P5 | `p5-triage.md`, `evidence-standard.md`, `reporting-templates.md` |
+| P3 | `p3-test-design.md`, `attack-playbooks/00-index.md`, `module-index.md` (pick the module matching in-scope surface); `critical-review-loop.md` or `dig-deeper-chain.md` only when triggered |
+| P4 | `p4-validation.md`, `evidence-standard.md`, `attack-playbooks/<type>.md` (re-check before each round); `critical-review-loop.md`, `dig-deeper-chain.md`, or `pivot-ladder.md` only when active |
+| P5 | `p5-triage.md`, `evidence-standard.md`, `reporting-templates.md`; `critical-review-loop.md` and `pivot-ladder.md` only when the finding path needs them |
 | P6 | `p6-report-retest.md`, `evidence-standard.md`, `reporting-templates.md`, `officecli-reporting.md` |
 
 ## Quick status

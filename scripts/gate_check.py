@@ -12,11 +12,15 @@ from pathlib import Path
 from typing import Any
 
 from schemas import LEDGER_SCHEMAS, create_missing_ledgers, validate_ledger_header
+from policy import PolicyError, ScopePolicy, read_engagement
 
 
 PHASES = ["P0", "P1", "P2", "P3", "P4", "P5", "P6"]
 PLACEHOLDERS = {"", "TO_BE_CONFIRMED", "<todo>", "todo", "unknown"}
 FINAL_TEST_STATES = {"confirmed", "rejected", "blocked", "inconclusive", "not_applicable"}
+CHAIN_STATUSES = {"planned", *FINAL_TEST_STATES}
+MAX_EXPLORATION_HOPS = 3
+OPTIONAL_EXPLORATION_LEDGERS = {"dig-deeper-chain.csv", "pivot-ladder.csv"}
 REVIEW_DECISIONS = {"retain", "reject", "blocked", "inconclusive", "not_applicable"}
 REVIEW_DECISION_BY_STATUS = {
     "confirmed": "retain",
@@ -81,6 +85,22 @@ def meaningful(value: Any) -> bool:
 
 def split_ids(value: str) -> set[str]:
     return {part.strip() for part in value.replace(";", ",").split(",") if part.strip()}
+
+
+def read_optional_csv(root: Path, name: str, errors: list[str]) -> list[dict[str, str]]:
+    """Read an optional feature ledger without making it mandatory for legacy workspaces."""
+    path = root / name
+    if not path.exists():
+        return []
+    header_error = validate_ledger_header(path, CSV_TEMPLATES[name])
+    if header_error:
+        errors.append(header_error)
+        return []
+    try:
+        return read_csv(path)
+    except ValueError as exc:
+        errors.append(str(exc))
+        return []
 
 
 def p0(root: Path, errors: list[str]) -> None:
@@ -224,6 +244,10 @@ def p3(root: Path, errors: list[str]) -> None:
             errors.append(f"test-matrix.csv line {index}: asset_id '{row.get('asset_id')}' not found in asset-inventory.csv")
         if meaningful(row.get("surface_id")) and surface_ids and row.get("surface_id") not in surface_ids:
             errors.append(f"test-matrix.csv line {index}: surface_id '{row.get('surface_id')}' not found in surface-inventory.csv")
+    reviews: list[dict[str, str]] = []
+    if (root / "critical-review.csv").exists():
+        reviews = read_critical_reviews(root, errors)
+    validate_optional_ladders(root, tests, set(), reviews, errors, phase="P3")
 
 
 def p4(root: Path, errors: list[str]) -> None:
@@ -249,6 +273,7 @@ def p4(root: Path, errors: list[str]) -> None:
                 errors.append(f"evidence-ledger.csv line {index}: missing {field}")
     reviews = read_critical_reviews(root, errors)
     validate_critical_reviews(reviews, tests, evidence_ids, errors)
+    validate_optional_ladders(root, tests, evidence_ids, reviews, errors, phase="P4")
 
 
 def p5(root: Path, errors: list[str]) -> None:
@@ -280,6 +305,7 @@ def p5(root: Path, errors: list[str]) -> None:
                 errors.append(f"finding {row.get('finding_id')} references unknown {evidence_id}")
     reviews = read_critical_reviews(root, errors)
     validate_critical_reviews(reviews, tests, evidence_ids, errors, findings=findings)
+    validate_optional_ladders(root, tests, evidence_ids, reviews, errors, phase="P5")
 
 
 def read_critical_reviews(root: Path, errors: list[str]) -> list[dict[str, str]]:
@@ -364,6 +390,212 @@ def validate_critical_reviews(
             errors.append(f"critical-review.csv finding {finding_id} needs a review with decision 'retain'")
 
 
+def _group_rows(rows: list[dict[str, str]], field: str) -> dict[str, list[dict[str, str]]]:
+    groups: dict[str, list[dict[str, str]]] = {}
+    for row in rows:
+        groups.setdefault(row.get(field, ""), []).append(row)
+    return groups
+
+
+def _safe_step_number(row: dict[str, str]) -> int:
+    try:
+        return int(row.get("step_no", ""))
+    except ValueError:
+        return 0
+
+
+def validate_optional_ladders(
+    root: Path,
+    tests: list[dict[str, str]],
+    evidence_ids: set[str],
+    reviews: list[dict[str, str]],
+    errors: list[str],
+    *,
+    phase: str,
+) -> None:
+    """Validate opt-in bounded exploration ledgers without adding target actions."""
+    dig_rows = read_optional_csv(root, "dig-deeper-chain.csv", errors)
+    pivot_rows = read_optional_csv(root, "pivot-ladder.csv", errors)
+    if not dig_rows and not pivot_rows:
+        return
+
+    test_by_id = {row.get("test_id", ""): row for row in tests if row.get("test_id")}
+    review_by_id = {row.get("review_id", ""): row for row in reviews if row.get("review_id")}
+    finalized_phase = phase in {"P4", "P5"}
+
+    def validate_rows(
+        rows: list[dict[str, str]],
+        *,
+        filename: str,
+        group_field: str,
+        required_fields: tuple[str, ...],
+    ) -> None:
+        groups: dict[str, list[tuple[int, dict[str, str]]]] = {}
+        seen_tests: dict[str, set[str]] = {}
+        for index, row in enumerate(rows, 2):
+            prefix = f"{filename} line {index}"
+            for field in required_fields:
+                if not meaningful(row.get(field)):
+                    errors.append(f"{prefix}: missing {field}")
+            group_id = row.get(group_field, "")
+            test_id = row.get("test_id", "")
+            status = row.get("status", "")
+            try:
+                step_no = int(row.get("step_no", ""))
+            except ValueError:
+                step_no = 0
+            if step_no < 1:
+                errors.append(f"{prefix}: step_no must be a positive integer")
+            if step_no > MAX_EXPLORATION_HOPS:
+                errors.append(
+                    f"{prefix}: maximum exploration depth is {MAX_EXPLORATION_HOPS} hops per {group_field}"
+                )
+            groups.setdefault(group_id, []).append((step_no, row))
+            seen_tests.setdefault(group_id, set())
+            if test_id in seen_tests[group_id] and test_id:
+                errors.append(f"{prefix}: duplicate test_id '{test_id}' within {group_field} '{group_id}'")
+            if test_id:
+                seen_tests[group_id].add(test_id)
+
+            if status not in CHAIN_STATUSES:
+                errors.append(f"{prefix}: invalid status '{status}'")
+            test = test_by_id.get(test_id)
+            if test is None:
+                if test_id:
+                    errors.append(f"{prefix}: test_id '{test_id}' not found in test-matrix.csv")
+            else:
+                if row.get("hypothesis_id") != test.get("hypothesis_id") and filename == "dig-deeper-chain.csv":
+                    errors.append(f"{prefix}: hypothesis_id does not match test {test_id}")
+                if status and status != test.get("status"):
+                    errors.append(
+                        f"{prefix}: status '{status}' does not match test {test_id} status '{test.get('status')}'"
+                    )
+            linked_evidence = split_ids(row.get("evidence_ids", ""))
+            if evidence_ids and linked_evidence - evidence_ids:
+                for evidence_id in sorted(linked_evidence - evidence_ids):
+                    errors.append(f"{prefix}: unknown evidence_id '{evidence_id}'")
+            next_test_id = row.get("next_test_id", "")
+            if filename == "dig-deeper-chain.csv" and next_test_id and next_test_id not in test_by_id:
+                errors.append(f"{prefix}: next_test_id '{next_test_id}' not found in test-matrix.csv")
+
+            review_id = row.get("review_id", "")
+            if review_id:
+                review = review_by_id.get(review_id)
+                if review is None:
+                    errors.append(f"{prefix}: review_id '{review_id}' not found in critical-review.csv")
+                elif review.get("test_id") != test_id:
+                    errors.append(f"{prefix}: review_id '{review_id}' does not review test {test_id}")
+            if status in {"blocked", "inconclusive", "not_applicable"} and not meaningful(row.get("stop_reason")):
+                errors.append(f"{prefix}: stop_reason is required for status '{status}'")
+            if finalized_phase:
+                if status not in FINAL_TEST_STATES:
+                    errors.append(f"{prefix}: P4/P5 requires a finalized status")
+                if status == "confirmed" and not linked_evidence:
+                    errors.append(f"{prefix}: confirmed hop requires evidence_ids")
+                if not review_id:
+                    errors.append(f"{prefix}: finalized hop requires review_id")
+
+        for group_id, items in groups.items():
+            steps = [step for step, _ in items if step > 0]
+            if steps and sorted(steps) != list(range(1, max(steps) + 1)):
+                errors.append(f"{filename}: {group_field} '{group_id}' has non-contiguous step_no values")
+            if filename == "dig-deeper-chain.csv":
+                ordered = sorted((item for item in items if item[0] > 0), key=lambda item: item[0])
+                for offset, (_, row) in enumerate(ordered):
+                    next_test_id = row.get("next_test_id", "")
+                    if offset < len(ordered) - 1:
+                        expected_next = ordered[offset + 1][1].get("test_id", "")
+                        if next_test_id != expected_next:
+                            errors.append(
+                                f"{filename}: {group_field} '{group_id}' must link each next_test_id to the following hop"
+                            )
+                    elif next_test_id:
+                        errors.append(
+                            f"{filename}: terminal {group_field} '{group_id}' hop must not have next_test_id"
+                        )
+
+    validate_rows(
+        dig_rows,
+        filename="dig-deeper-chain.csv",
+        group_field="chain_id",
+        required_fields=(
+            "chain_id", "step_no", "test_id", "hypothesis_id", "question",
+            "alternative_explanation", "disconfirming_test", "negative_control",
+            "scope_impact", "status", "uncertainty",
+        ),
+    )
+    chains_by_test: dict[str, str] = {}
+    chain_starts: dict[str, str] = {}
+    for chain_id, rows in _group_rows(dig_rows, "chain_id").items():
+        ordered = sorted(rows, key=_safe_step_number)
+        for row in ordered:
+            test_id = row.get("test_id", "")
+            if test_id and test_id in chains_by_test and chains_by_test[test_id] != chain_id:
+                errors.append(
+                    f"dig-deeper-chain.csv: test_id '{test_id}' is reused across chain_ids "
+                    f"'{chains_by_test[test_id]}' and '{chain_id}'"
+                )
+            elif test_id:
+                chains_by_test[test_id] = chain_id
+        if ordered:
+            hypothesis_id = ordered[0].get("hypothesis_id", "")
+            if hypothesis_id and hypothesis_id in chain_starts and chain_starts[hypothesis_id] != chain_id:
+                errors.append(
+                    f"dig-deeper-chain.csv: hypothesis_id '{hypothesis_id}' starts multiple chain_ids; "
+                    "create a new reviewed hypothesis instead of resetting the chain"
+                )
+            elif hypothesis_id:
+                chain_starts[hypothesis_id] = chain_id
+    validate_rows(
+        pivot_rows,
+        filename="pivot-ladder.csv",
+        group_field="ladder_id",
+        required_fields=(
+            "ladder_id", "step_no", "test_id", "from_asset_id", "to_asset_id",
+            "actor_or_identity", "authorization_basis", "precondition", "action",
+            "expected_control", "status", "rollback", "impact",
+        ),
+    )
+
+    if not pivot_rows:
+        return
+    try:
+        assets = read_csv(root / "asset-inventory.csv")
+    except ValueError as exc:
+        errors.append(str(exc))
+        return
+    asset_by_id = {row.get("asset_id", ""): row for row in assets if row.get("asset_id")}
+    try:
+        engagement = read_engagement(root)
+        scope_policy = ScopePolicy.from_engagement(engagement)
+    except (PolicyError, OSError, json.JSONDecodeError) as exc:
+        errors.append(f"pivot-ladder requires valid engagement.json allowed_assets: {exc}")
+        scope_policy = None
+    for index, row in enumerate(pivot_rows, 2):
+        prefix = f"pivot-ladder.csv line {index}"
+        source = row.get("from_asset_id", "")
+        destination = row.get("to_asset_id", "")
+        if source and destination and source == destination:
+            errors.append(f"{prefix}: from_asset_id and to_asset_id must differ")
+        for label, asset_id in (("from_asset_id", source), ("to_asset_id", destination)):
+            asset = asset_by_id.get(asset_id)
+            if asset is None:
+                if asset_id:
+                    errors.append(f"{prefix}: {label} '{asset_id}' not found in asset-inventory.csv")
+            elif asset.get("scope_status") != "in_scope":
+                errors.append(f"{prefix}: {label} '{asset_id}' must be explicitly in_scope")
+            elif scope_policy is not None and not scope_policy.host_allowed(asset.get("asset", "")):
+                errors.append(
+                    f"{prefix}: {label} '{asset_id}' is not allowed by engagement.json allowed_assets"
+                )
+        test = test_by_id.get(row.get("test_id", ""))
+        if test is not None and destination and test.get("asset_id") != destination:
+            errors.append(
+                f"{prefix}: test {row.get('test_id')} targets asset_id '{test.get('asset_id')}', "
+                f"not pivot to_asset_id '{destination}'"
+            )
+
+
 def p6(root: Path, errors: list[str]) -> None:
     state = read_json(root / "state.json")
     report = root / "final-report.md"
@@ -412,7 +644,7 @@ def main() -> int:
     try:
         state = read_json(root / "state.json")
         for name, headers in CSV_TEMPLATES.items():
-            if name == "critical-review.csv":
+            if name == "critical-review.csv" or name in OPTIONAL_EXPLORATION_LEDGERS:
                 continue
             header_error = validate_ledger_header(root / name, headers)
             if header_error:

@@ -17,6 +17,12 @@
   "critical-review.csv": [
     "review_id", "hypothesis_id", "test_id", "finding_id", "claim", "evidence_ids", "alternative_explanation", "disconfirming_test", "negative_control", "scope_impact", "uncertainty", "decision", "reviewer", "reviewed_at_utc"
   ],
+  "dig-deeper-chain.csv": [
+    "chain_id", "step_no", "test_id", "hypothesis_id", "question", "alternative_explanation", "disconfirming_test", "negative_control", "scope_impact", "evidence_ids", "next_test_id", "status", "stop_reason", "uncertainty", "review_id"
+  ],
+  "pivot-ladder.csv": [
+    "ladder_id", "step_no", "test_id", "from_asset_id", "to_asset_id", "actor_or_identity", "authorization_basis", "precondition", "action", "expected_control", "evidence_ids", "status", "rollback", "impact", "stop_reason", "review_id"
+  ],
   "findings-index.csv": [
     "finding_id", "title", "root_cause", "affected_assets", "status", "severity", "severity_rationale", "confidence", "prerequisite", "demonstrated_impact", "evidence_ids", "relationships", "remediation_owner", "disclosure_status", "retest_status"
   ]

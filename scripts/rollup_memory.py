@@ -53,6 +53,8 @@ def main() -> None:
     tests = read_csv(root / "test-matrix.csv")
     evidence = read_csv(root / "evidence-ledger.csv")
     reviews = read_csv(root / "critical-review.csv")
+    dig_deeper_chains = read_csv(root / "dig-deeper-chain.csv")
+    pivot_ladders = read_csv(root / "pivot-ladder.csv")
     findings = read_csv(root / "findings-index.csv")
 
     rollup = {
@@ -65,6 +67,8 @@ def main() -> None:
         "tests": tests,
         "evidence": evidence,
         "critical_reviews": reviews,
+        "dig_deeper_chains": dig_deeper_chains,
+        "pivot_ladders": pivot_ladders,
         "findings": findings,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
@@ -113,6 +117,22 @@ def main() -> None:
         L.append(
             f"- `{review.get('review_id')}` test={review.get('test_id')} finding={review.get('finding_id','')} "
             f"[{review.get('decision')}] uncertainty={review.get('uncertainty')}"
+        )
+    L.append("")
+
+    L.append(f"## Dig-deeper chains ({len(dig_deeper_chains)})")
+    for hop in dig_deeper_chains:
+        L.append(
+            f"- `{hop.get('chain_id')}` hop={hop.get('step_no')} test={hop.get('test_id')} "
+            f"[{hop.get('status')}] uncertainty={hop.get('uncertainty')}"
+        )
+    L.append("")
+
+    L.append(f"## Pivot ladders ({len(pivot_ladders)})")
+    for hop in pivot_ladders:
+        L.append(
+            f"- `{hop.get('ladder_id')}` hop={hop.get('step_no')} "
+            f"{hop.get('from_asset_id')} -> {hop.get('to_asset_id')} [{hop.get('status')}]"
         )
     L.append("")
 
