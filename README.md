@@ -9,7 +9,7 @@ validation, triage, and reporting.
 This repository is designed to help researchers keep scope, safety controls, and
 evidence attached to every assessment. It is not a scanner for arbitrary targets.
 
-![Vulnhunter Superworkflow architecture](assets/vhs-workflow.svg)
+![Vulnhunter Superworkflow infographic](assets/vhs-workflow.svg)
 
 ## Install as a Hermes skill
 
@@ -250,33 +250,54 @@ controlled-impact actions.
 
 ## Workflow
 
+The infographic above is the compact visual summary. The Mermaid view below
+shows the decision paths behind it: authorization remains a hard gate, the
+router loads only active modules, and every validation path ends in evidence,
+triage, and reporting.
+
 ```mermaid
-flowchart TD
-    A[Select execution profile] --> P[plan-only<br/>No target traffic]
-    A --> B[Create engagement]
-    B --> C[Complete engagement.json]
-    C --> D{P0 authorization gate<br/>completed?}
-    D -- No --> X[Stop: obtain authorization]
-    D -- Yes --> E{Select least-invasive<br/>non-plan profile}
-    E --> O[passive-osint<br/>Public sources only]
-    E --> S[active-safe<br/>Scoped resolve, probe, crawl]
-    E --> N[scanner-safe<br/>Approved discovery and scans]
+flowchart LR
+    P0{"P0 · Authorization"}
+    P0 -->|No| STOP["STOP · obtain authorization"]
+    P0 -->|Yes| PROFILE{"Least-invasive profile"}
+    PROFILE -->|plan-only| PLAN["Plan + manifest<br/>no target traffic"]
+    PROFILE -->|passive / active / scanner| P1["P1 · Threat model"]
+    PLAN --> MANIFEST["Execution manifest"]
 
-    O --> G[Scope guard]
-    S --> G
-    N --> G
-    G --> R[Recon and crawl outputs]
-    R --> U[Normalize and re-check scope]
-    U --> Q[Scanner hypotheses<br/>when profile permits]
-    Q --> V[P4 controlled validation<br/>baseline, mutation, negative control]
-    V --> T[P5 triage and severity]
-    T --> W[P6 redacted report and retest]
+    P1 --> P2["P2 · Surface map"]
+    P2 --> P3["P3 · Test design"]
+    P3 --> ROUTER{"Lazy-load router<br/>phase + active ledger"}
+    ROUTER -->|none active| P4["P4 · Controlled validation"]
+    ROUTER -->|review needed| REVIEW["Critical review<br/>one bounded row / test"]
+    ROUTER -->|credible signal| DEEP["Dig-deeper chain<br/>max 3 hops"]
+    ROUTER -->|in-scope asset path| PIVOT["Pivot ladder<br/>allowlist + max 3 hops"]
+    ROUTER -->|composite finding| KILL["Kill-chain<br/>P5 analysis only"]
+    REVIEW --> P4
+    DEEP --> P4
+    PIVOT --> P4
+    P4 -->|evidence + control pass| P5["P5 · Triage + severity"]
+    P4 -->|fails validation| REJECT["Reject / keep hypothesis"]
+    KILL --> P5
+    P5 --> P6["P6 · Redacted report + retest"]
 
-    P --> M[Execution plan and manifest]
-    O --> M[Manifest and scoped artifacts]
-    S --> M
-    N --> M
-    W --> M
+    MEMORY[("Per-engagement<br/>local ledgers")]
+    MEMORY -.-> P1
+    MEMORY -.-> ROUTER
+    MEMORY -.-> P4
+    MEMORY -.-> P5
+
+    classDef gate fill:#152238,color:#fff,stroke:#152238,stroke-width:2px;
+    classDef phase fill:#fff,color:#152238,stroke:#b9c7d4,stroke-width:1.5px;
+    classDef router fill:#eef5fc,color:#152238,stroke:#8eb6d9,stroke-width:1.5px;
+    classDef module fill:#f4f7fa,color:#152238,stroke:#9aaaba,stroke-width:1.5px;
+    classDef stop fill:#fff1f1,color:#8d3030,stroke:#d88b8b,stroke-width:1.5px;
+    classDef memory fill:#edf2f6,color:#36485b,stroke:#9eafbf,stroke-width:1.5px;
+    class P0,PROFILE gate;
+    class P1,P2,P3,P4,P5,P6,PLAN,MANIFEST phase;
+    class ROUTER router;
+    class REVIEW,DEEP,PIVOT,KILL module;
+    class STOP,REJECT stop;
+    class MEMORY memory;
 ```
 
 The P0–P6 phase model is: P0 authorization, P1 threat modeling, P2 surface
