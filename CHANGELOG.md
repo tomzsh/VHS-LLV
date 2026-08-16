@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.7.0 — progressive reference context loading
+
+- Added the deterministic, no-network `scripts/context_slice.py` helper for
+  Markdown outlines and selected heading sections, with fenced-code handling
+  and nested-child preservation.
+- Hardened the routing contract around section-level playbook loading while
+  retaining full imported references; `--full` remains available for P4 exact
+  validation and unmatched headings.
+- Updated the documentation and offline tests for the progressive-loading path.
+
 ## 2.6.0 — cited 2026 Web2 vulnerability references
 
 - Added `references/web2-2026-references.md` covering ATO, IDOR/BOLA,

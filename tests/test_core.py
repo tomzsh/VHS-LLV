@@ -28,7 +28,7 @@ class ReferenceIntegrityTests(unittest.TestCase):
         router = (SKILL / "references" / "context-router.md").read_text(encoding="utf-8")
         index = (SKILL / "references" / "index.md").read_text(encoding="utf-8")
         skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("version: 2.6.0", skill)
+        self.assertIn("version: 2.7.0", skill)
         self.assertIn("web2-2026-references.md", router)
         self.assertIn("web2-2026-references.md", index)
         for term in (
@@ -53,6 +53,86 @@ class ReferenceIntegrityTests(unittest.TestCase):
         for name in ("references/web2-2026-references.md", "references/index.md"):
             text = (SKILL / name).read_text(encoding="utf-8")
             self.assertNotRegex(text, r"^\+", msg=name)
+
+
+class ContextSliceTests(unittest.TestCase):
+    def test_context_slice_keeps_selected_section_and_nested_children(self) -> None:
+        from context_slice import slice_sections
+
+        source = "# Root\nintro\n## Entry\nentry\n### Detail\ndetail\n## Evidence\nevidence\n"
+        sliced = slice_sections(source, ["entry"])
+        self.assertIn("entry", sliced)
+        self.assertIn("detail", sliced)
+        self.assertNotIn("evidence", sliced)
+
+    def test_context_slice_falls_back_to_full_text_without_match(self) -> None:
+        from context_slice import slice_sections
+
+        source = "# Root\n## Probe\nprobe\n"
+        self.assertEqual(slice_sections(source, ["missing"]), source)
+
+    def test_context_slice_ignores_heading_like_comments_inside_fences(self) -> None:
+        from context_slice import slice_sections
+
+        source = "## Probe\n```bash\n# not a heading\n```\nbody\n## Evidence\nevidence\n"
+        sliced = slice_sections(source, ["probe"])
+        self.assertIn("body", sliced)
+        self.assertNotIn("evidence", sliced)
+
+    def test_context_slice_cli_outline_and_full(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "ref.md"
+            path.write_text("# Root\n## Probe\nbody\n", encoding="utf-8")
+            outline = subprocess.run(
+                [sys.executable, str(SCRIPTS / "context_slice.py"), "--file", str(path), "--outline"],
+                text=True, capture_output=True, check=False,
+            )
+            full = subprocess.run(
+                [sys.executable, str(SCRIPTS / "context_slice.py"), "--file", str(path), "--full"],
+                text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(outline.returncode, 0)
+            self.assertIn("Probe", outline.stdout)
+            self.assertEqual(full.stdout, path.read_text(encoding="utf-8"))
+
+    def test_context_slice_parses_bilingual_numbered_headings(self) -> None:
+        from context_slice import parse_headings, slice_sections
+
+        source = "# 根\n## 1. 高频入口 / Entry\nbody\n## 2. 证据 / Evidence\nproof\n"
+        self.assertEqual(parse_headings(source)[1], (2, "1. 高频入口 / Entry", 2, 3))
+        self.assertEqual(slice_sections(source, ["高频入口"]), "## 1. 高频入口 / Entry\nbody\n")
+
+    def test_context_slice_closes_tilde_fence_with_longer_delimiter(self) -> None:
+        from context_slice import slice_sections
+
+        source = "## Probe\n~~~~python\n# not a heading\n~~~~~   \nbody\n## Evidence\nevidence\n"
+        sliced = slice_sections(source, ["probe"])
+        self.assertIn("body", sliced)
+        self.assertNotIn("evidence", sliced)
+
+    def test_context_slice_combines_multiple_non_overlapping_sections(self) -> None:
+        from context_slice import slice_sections
+
+        source = "# Root\n## Entry\nentry\n## Evidence\nevidence\n## Compliance\ncompliance\n"
+        self.assertEqual(
+            slice_sections(source, ["entry", "compliance"]),
+            "## Entry\nentry\n## Compliance\ncompliance\n",
+        )
+
+    def test_context_slice_full_takes_precedence_over_outline_and_sections(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "ref.md"
+            source = "# Root\n## Probe\nbody\n"
+            path.write_text(source, encoding="utf-8")
+            full = subprocess.run(
+                [
+                    sys.executable, str(SCRIPTS / "context_slice.py"), "--file", str(path),
+                    "--outline", "--section", "missing", "--full",
+                ],
+                text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(full.returncode, 0, full.stderr)
+            self.assertEqual(full.stdout, source)
 
 
 class SchemaTests(unittest.TestCase):

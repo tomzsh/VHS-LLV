@@ -56,6 +56,24 @@ scanner tools (`subfinder`, `httpx`, `nuclei`, `dalfox`, …) are optional and
 light up extra stages when present. Nothing runs against a target until you
 create an engagement and pass the P0 authorization gate.
 
+## Progressive reference loading
+
+`scripts/context_slice.py` is a standard-library, read-only helper for reviewing
+large Markdown references without changing their content or accessing the
+network. Inspect a selected playbook first, then request matching sections:
+
+```bash
+python3 scripts/context_slice.py --file references/attack-playbooks/rce.md --outline
+python3 scripts/context_slice.py --file references/attack-playbooks/rce.md \
+  --section "高频入口" --section "探测手法" --section Bypass \
+  --section "复现" --section "证据" --section "不要做" \
+  --section Entry --section Probe --section Evidence --section Compliance
+```
+
+`--full` prints the source file exactly for P4 exact validation or if no selected
+heading matches. The helper keeps nested child sections and ignores heading-like
+lines inside triple-backtick or triple-tilde fenced code blocks.
+
 ## Safety and authorization
 
 Use this project only when you have explicit authorization from the asset owner
@@ -286,6 +304,8 @@ permission to use, modify, or redistribute the code.
 
 - Optional tools are skipped when unavailable, so a completed run may have less
   coverage than a fully provisioned installation.
+- Context slicing is heading-based. Use `--full` when an exact P4 review needs
+  material outside the selected headings or a reference has no matching heading.
 
 ## Contributing
 

@@ -27,6 +27,25 @@ Load `references/non-qualifying.md` before classifying a finding and load
 | P5 triage | `p5-triage.md`, `taxonomy-rating.md`, and the applicable judging/CVSS references |
 | P6 reporting | `p6-report-retest.md`, `reporting-templates.md`; load `officecli-reporting.md` only for Office deliverables |
 
+## Progressive playbook loading
+
+For each selected attack playbook, inspect headings before loading sections:
+
+```bash
+python3 <skill-dir>/scripts/context_slice.py \
+  --file <skill-dir>/references/attack-playbooks/<type>.md --outline
+python3 <skill-dir>/scripts/context_slice.py \
+  --file <skill-dir>/references/attack-playbooks/<type>.md \
+  --section "高频入口" --section "探测手法" --section Bypass \
+  --section "复现" --section "证据" --section "不要做" \
+  --section Entry --section Probe --section Evidence --section Compliance
+```
+
+The helper preserves nested children and returns the original file when no
+selected heading matches. Use `--full` for P4 exact validation or when the
+selected slice has no matching heading. This is an additional access path: do
+not rewrite, translate, delete, or reduce imported playbooks or references.
+
 ## Surface routing
 
 - GraphQL endpoint/schema/tool → `graphql-integration.md` + GraphQL playbook.
@@ -43,7 +62,8 @@ Load `references/non-qualifying.md` before classifying a finding and load
 ## Loading invariants
 
 - Do not load every attack playbook. Read the index, choose by surface, then
-  load the smallest matching playbook set.
+  use the progressive playbook-loading policy above for the smallest matching
+  section set.
 - Do not load `CHANGELOG.md`, the full bundled-script catalog, or unrelated
   phase references during an engagement.
 - If routing is uncertain, load `index.md`, the current phase, and the matching

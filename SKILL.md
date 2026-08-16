@@ -1,7 +1,7 @@
 ---
 name: vhs
 description: "WEB2/GraphQL pentest and bug-bounty code-audit, P0-P6 gates. Primary web2 entry-point skill — IDOR/object-level access, GraphQL auth/schema testing, file access, export/auth-bypass, injection-to-RCE, SSRF, business-logic & race/dedup flaws, authorized web/app/API/mobile testing."
-version: 2.6.0
+version: 2.7.0
 author: tomzsh
 platforms: [linux]
 metadata:
@@ -84,7 +84,23 @@ python3 <skill-dir>/scripts/rollup_memory.py ./engagement --json
 
 Resolve paths relative to this `SKILL.md`, then read:
 
-1. `references/context-router.md` first — it is the lazy-loading policy.
+1. `references/context-router.md` first — it is the progressive-loading policy.
+   For a selected attack playbook, inspect its outline and then load only the
+   relevant sections:
+
+   ```bash
+   python3 <skill-dir>/scripts/context_slice.py \
+     --file <skill-dir>/references/attack-playbooks/<type>.md --outline
+   python3 <skill-dir>/scripts/context_slice.py \
+     --file <skill-dir>/references/attack-playbooks/<type>.md \
+     --section "高频入口" --section "探测手法" --section Bypass \
+     --section "复现" --section "证据" --section "不要做" \
+     --section Entry --section Probe --section Evidence --section Compliance
+   ```
+
+   Use `--full` for P4 exact validation or when the selected slice has no
+   matching heading. The helper is read-only and does not replace the full
+   imported playbook.
 2. `references/operating-contract.md`, `references/index.md`, and the current
    phase reference.
 3. `references/non-qualifying.md` before classifying findings and

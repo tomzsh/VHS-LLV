@@ -1,20 +1,21 @@
 # Reference Index
 
-Use this file as the routing table. Read every selected file completely before acting.
+Use this file to identify reference paths. `context-router.md` is the single
+progressive-loading policy authority; follow it before opening a selected
+playbook or reference.
 
 ## Core/load policy
 
-- `context-router.md` first; it defines lazy-loading and fallback rules.
 - `operating-contract.md`, `index.md`, and the current phase file.
 - `non-qualifying.md` before classifying a finding.
 - `evidence-standard.md` before P4/P5 evidence review.
 - `taxonomy-rating.md` from P1 onward when modeling or rating severity.
-- `attack-playbooks/00-index.md` from P3 onward; load only selected playbooks.
+- `attack-playbooks/00-index.md` from P3 onward.
 - `reporting-templates.md` and `officecli-reporting.md` only for P6 deliverables.
 - `module-index.md` at P3/P4; load only matching target modules.
 - `code-graph-rag-integration.md` only for source/SAST/code-graph work.
 - `web2-2026-references.md` when one of the requested Web2 vulnerability classes
-  is in scope; load only its matching subsection and selected playbook.
+  is in scope.
 - `account-otp.md` only for signup/OTP work.
 - `research-stage.md` only for disclosed research.
 - `operator-commands.md`, `tool-catalog.md`, or `crawler-extras.md` only when
