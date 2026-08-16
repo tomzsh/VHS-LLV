@@ -9,6 +9,8 @@ validation, triage, and reporting.
 This repository is designed to help researchers keep scope, safety controls, and
 evidence attached to every assessment. It is not a scanner for arbitrary targets.
 
+![Vulnhunter Superworkflow architecture](assets/vhs-workflow.svg)
+
 ## Install as a Hermes skill
 
 VHS is a [Hermes Agent](https://hermes-agent.nousresearch.com) skill. Install it
