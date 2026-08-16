@@ -34,7 +34,7 @@ The folder name (`vhs`) becomes the skill name. Verify the install:
 
 ```bash
 cd ~/.hermes/skills/security/vhs
-python3 -m unittest discover -s tests -v        # 72 offline tests
+python3 -m unittest discover -s tests -v        # 78 offline tests
 python3 -m py_compile scripts/*.py
 python3 scripts/check_tools.py --profile scanner-safe --verify   # optional-tool audit
 ```
@@ -105,6 +105,8 @@ exposed, or a third party could be impacted.
   and scanning tools
 - Offline tests, including fake-tool integration tests that never contact a real
   target
+- `critical-review.csv` ledger and P4/P5 gates for bounded alternative,
+  disconfirmation, control, scope/impact, uncertainty, and decision review
 
 ## Lazy-load and workflow hardening
 
@@ -140,6 +142,24 @@ not replace authorization, scope, evidence, negative-control validation, or
 per-engagement memory isolation. See
 `references/pentest-engineering-adapter.md` for its authority order and
 non-goals.
+
+### Anti-skip critical review
+
+P3–P5 can load `references/critical-review-loop.md` when a hypothesis, test
+result, or finding needs adversarial review. P4 requires one bounded row in
+`critical-review.csv` for every finalized test; P5 requires every finding to
+link to a `retain` review. The row captures the claim, evidence, alternative
+explanation, disconfirming test, negative/expected control, scope/impact,
+uncertainty, and decision. A second pass is reserved for conflicting evidence
+or high/critical impact, so the loop improves rigor without repeating prose for
+every reconnaissance result.
+
+New engagements create the ledger automatically. For an older engagement,
+initialize missing ledgers before P4 with:
+
+```bash
+python3 scripts/gate_check.py ./engagement --init
+```
 
 ## Per-engagement memory isolation
 

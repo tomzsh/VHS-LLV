@@ -24,6 +24,7 @@ sys.path.insert(0, str(SCRIPTS))
 from policy import PolicyError, ScopePolicy, authorize_run  # noqa: E402
 from api_auth_probe import login, login_allowed, req, resolve_endpoint, state_change_allowed  # noqa: E402
 from schemas import LEDGER_SCHEMAS, create_missing_ledgers  # noqa: E402
+from gate_check import p4, p5  # noqa: E402
 from vulnhunter_orchestrator import Step, authorization_fingerprint, stage  # noqa: E402
 
 
@@ -154,6 +155,121 @@ class PentestEngineeringAdapterTests(unittest.TestCase):
             "parallel analysis",
         ):
             self.assertIn(term, adapter, term)
+
+
+class CriticalReviewLoopTests(unittest.TestCase):
+    REVIEW_FIELDS = [
+        "review_id", "hypothesis_id", "test_id", "finding_id", "claim",
+        "evidence_ids", "alternative_explanation", "disconfirming_test",
+        "negative_control", "scope_impact", "uncertainty", "decision",
+        "reviewer", "reviewed_at_utc",
+    ]
+
+    def _write_csv(self, root: Path, name: str, rows: list[dict[str, str]]) -> None:
+        fields = self.REVIEW_FIELDS if name == "critical-review.csv" else LEDGER_SCHEMAS[name]
+        with (root / name).open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(rows)
+
+    def _write_p4_fixture(self, root: Path) -> None:
+        root.mkdir()
+        self._write_csv(root, "test-matrix.csv", [{
+            "test_id": "TST-001", "hypothesis_id": "HYP-001", "asset_id": "AST-001",
+            "surface_id": "SUR-001", "baseline": "baseline", "mutation": "mutation",
+            "expected_result": "deny", "negative_control": "control", "evidence_plan": "plan",
+            "cleanup": "cleanup", "risk": "low", "permission_mode": "ACTIVE_SAFE",
+            "status": "confirmed", "evidence_ids": "EV-001", "notes": "playbook: sqli",
+        }])
+        self._write_csv(root, "evidence-ledger.csv", [{
+            "evidence_id": "EV-001", "captured_at_utc": "2026-08-16T00:00:00+00:00",
+            "hypothesis_id": "HYP-001", "test_id": "TST-001", "finding_id": "F-001",
+            "asset_id": "AST-001", "path": "evidence/redacted/EV-001.txt", "sha256": "a" * 64,
+            "sensitivity": "low", "redaction_status": "reviewed", "observation": "observed",
+            "cleanup_status": "complete",
+        }])
+
+    def _write_p5_fixture(self, root: Path) -> None:
+        self._write_p4_fixture(root)
+        self._write_csv(root, "findings-index.csv", [{
+            "finding_id": "F-001", "title": "Finding", "root_cause": "Missing control",
+            "affected_assets": "AST-001", "status": "open", "severity": "medium",
+            "severity_rationale": "demonstrated", "confidence": "high", "prerequisite": "none",
+            "demonstrated_impact": "bounded", "evidence_ids": "EV-001", "relationships": "",
+            "remediation_owner": "owner", "disclosure_status": "draft", "retest_status": "not_started",
+        }])
+
+    def test_critical_review_reference_is_routed_for_p3_p4_p5(self) -> None:
+        reference = SKILL / "references" / "critical-review-loop.md"
+        skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        router = (SKILL / "references" / "context-router.md").read_text(encoding="utf-8")
+        self.assertTrue(reference.exists(), "critical review reference is missing")
+        self.assertIn("critical-review-loop.md", skill)
+        for phase in ("P3", "P4", "P5"):
+            self.assertRegex(router, rf"{phase}.*critical-review-loop\.md")
+
+    def test_new_engagement_bootstraps_critical_review_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            create = subprocess.run(
+                [
+                    sys.executable, str(SCRIPTS / "new_engagement.py"), str(root),
+                    "--title", "Critical review test", "--target", "example.com",
+                ],
+                text=True, capture_output=True, timeout=30, check=False,
+            )
+            self.assertEqual(create.returncode, 0, create.stderr)
+            self.assertTrue((root / "critical-review.csv").exists())
+
+    def test_p4_rejects_final_test_without_critical_review(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            self._write_p4_fixture(root)
+            errors: list[str] = []
+            p4(root, errors)
+            self.assertTrue(any("critical-review" in error for error in errors), errors)
+
+    def test_p4_rejects_review_without_disconfirming_test(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            self._write_p4_fixture(root)
+            self._write_csv(root, "critical-review.csv", [{
+                "review_id": "REV-001", "hypothesis_id": "HYP-001", "test_id": "TST-001",
+                "claim": "claim", "evidence_ids": "EV-001", "alternative_explanation": "alternative",
+                "disconfirming_test": "", "negative_control": "control", "scope_impact": "scoped",
+                "uncertainty": "low", "decision": "retain", "reviewer": "operator",
+                "reviewed_at_utc": "2026-08-16T00:00:00+00:00",
+            }])
+            errors: list[str] = []
+            p4(root, errors)
+            self.assertTrue(any("disconfirming_test" in error for error in errors), errors)
+
+    def test_p5_rejects_finding_without_linked_critical_review(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            self._write_p5_fixture(root)
+            errors: list[str] = []
+            p5(root, errors)
+            self.assertTrue(any("critical-review" in error for error in errors), errors)
+
+    def test_complete_review_satisfies_p4_and_p5(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            self._write_p5_fixture(root)
+            self._write_csv(root, "critical-review.csv", [{
+                "review_id": "REV-001", "hypothesis_id": "HYP-001", "test_id": "TST-001",
+                "finding_id": "F-001", "claim": "claim", "evidence_ids": "EV-001",
+                "alternative_explanation": "alternative", "disconfirming_test": "refute",
+                "negative_control": "control behaved as expected", "scope_impact": "scoped",
+                "uncertainty": "low", "decision": "retain", "reviewer": "operator",
+                "reviewed_at_utc": "2026-08-16T00:00:00+00:00",
+            }])
+            p4_errors: list[str] = []
+            p5_errors: list[str] = []
+            p4(root, p4_errors)
+            p5(root, p5_errors)
+            self.assertEqual(p4_errors, [])
+            self.assertEqual(p5_errors, [])
 
 
 class ContextSliceTests(unittest.TestCase):
@@ -1019,6 +1135,12 @@ class EngagementCliTests(unittest.TestCase):
                 text=True, capture_output=True, timeout=30, check=False,
             )
             self.assertEqual(gate.returncode, 0, gate.stdout + gate.stderr)
+            (root / "critical-review.csv").unlink()
+            legacy_gate = subprocess.run(
+                [sys.executable, str(SCRIPTS / "gate_check.py"), str(root), "--phase", "P0"],
+                text=True, capture_output=True, timeout=30, check=False,
+            )
+            self.assertEqual(legacy_gate.returncode, 0, legacy_gate.stdout + legacy_gate.stderr)
 
     def test_new_engagement_files_are_owner_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

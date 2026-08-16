@@ -52,6 +52,7 @@ def main() -> None:
     hyps = read_csv(root / "hypothesis-ledger.csv")
     tests = read_csv(root / "test-matrix.csv")
     evidence = read_csv(root / "evidence-ledger.csv")
+    reviews = read_csv(root / "critical-review.csv")
     findings = read_csv(root / "findings-index.csv")
 
     rollup = {
@@ -63,6 +64,7 @@ def main() -> None:
         "hypotheses": hyps,
         "tests": tests,
         "evidence": evidence,
+        "critical_reviews": reviews,
         "findings": findings,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
@@ -104,6 +106,14 @@ def main() -> None:
     L.append(f"## Evidence ({len(evidence)})")
     for e in evidence:
         L.append(f"- `{e.get('evidence_id')}` {e.get('observation')} [{e.get('redaction_status')}] {e.get('path')}")
+    L.append("")
+
+    L.append(f"## Critical reviews ({len(reviews)})")
+    for review in reviews:
+        L.append(
+            f"- `{review.get('review_id')}` test={review.get('test_id')} finding={review.get('finding_id','')} "
+            f"[{review.get('decision')}] uncertainty={review.get('uncertainty')}"
+        )
     L.append("")
 
     L.append(f"## Findings ({len(findings)})")

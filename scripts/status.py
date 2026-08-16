@@ -26,7 +26,7 @@ def read_csv_counts(root: Path, name: str) -> Counter:
     with path.open(encoding="utf-8", newline="") as fh:
         for row in csv.DictReader(fh):
             # status column names vary per ledger
-            for col in ("status", "scope_status", "redaction_status", "disclosure_status", "retest_status"):
+            for col in ("status", "scope_status", "redaction_status", "disclosure_status", "retest_status", "decision"):
                 if row.get(col):
                     counts[f"{col}={row[col].strip()}"] += 1
                     break
@@ -56,7 +56,7 @@ def main() -> int:
         "ledgers": {},
     }
     for name in ("asset-inventory.csv", "surface-inventory.csv", "hypothesis-ledger.csv",
-                 "test-matrix.csv", "evidence-ledger.csv", "findings-index.csv"):
+                 "test-matrix.csv", "evidence-ledger.csv", "critical-review.csv", "findings-index.csv"):
         summary["ledgers"][name] = dict(read_csv_counts(root, name))
 
     if args.json:
@@ -75,7 +75,7 @@ def main() -> int:
     for name, counts in summary["ledgers"].items():
         if not counts:
             continue
-        short = name.replace("-inventory.csv", "").replace("-ledger.csv", "").replace("-matrix.csv", "").replace("-index.csv", "")
+        short = name.replace("-inventory.csv", "").replace("-ledger.csv", "").replace("-matrix.csv", "").replace("-index.csv", "").replace(".csv", "")
         parts = [f"{v} {k.split('=', 1)[-1]}" for k, v in sorted(counts.items())]
         print(f"{short:16s} {', '.join(parts)}")
     return 0

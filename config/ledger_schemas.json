@@ -14,6 +14,9 @@
   "evidence-ledger.csv": [
     "evidence_id", "captured_at_utc", "hypothesis_id", "test_id", "finding_id", "asset_id", "path", "sha256", "sensitivity", "redaction_status", "observation", "cleanup_status"
   ],
+  "critical-review.csv": [
+    "review_id", "hypothesis_id", "test_id", "finding_id", "claim", "evidence_ids", "alternative_explanation", "disconfirming_test", "negative_control", "scope_impact", "uncertainty", "decision", "reviewer", "reviewed_at_utc"
+  ],
   "findings-index.csv": [
     "finding_id", "title", "root_cause", "affected_assets", "status", "severity", "severity_rationale", "confidence", "prerequisite", "demonstrated_impact", "evidence_ids", "relationships", "remediation_owner", "disclosure_status", "retest_status"
   ]

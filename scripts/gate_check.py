@@ -17,6 +17,28 @@ from schemas import LEDGER_SCHEMAS, create_missing_ledgers, validate_ledger_head
 PHASES = ["P0", "P1", "P2", "P3", "P4", "P5", "P6"]
 PLACEHOLDERS = {"", "TO_BE_CONFIRMED", "<todo>", "todo", "unknown"}
 FINAL_TEST_STATES = {"confirmed", "rejected", "blocked", "inconclusive", "not_applicable"}
+REVIEW_DECISIONS = {"retain", "reject", "blocked", "inconclusive", "not_applicable"}
+REVIEW_DECISION_BY_STATUS = {
+    "confirmed": "retain",
+    "rejected": "reject",
+    "blocked": "blocked",
+    "inconclusive": "inconclusive",
+    "not_applicable": "not_applicable",
+}
+REVIEW_REQUIRED_FIELDS = (
+    "review_id",
+    "hypothesis_id",
+    "test_id",
+    "claim",
+    "alternative_explanation",
+    "disconfirming_test",
+    "negative_control",
+    "scope_impact",
+    "uncertainty",
+    "decision",
+    "reviewer",
+    "reviewed_at_utc",
+)
 PLAYBOOK_CITATION_RE = re.compile(
     r"(?:attack[-_ ]?playbooks?/|(?:playbook|pb)\s*[:=]\s*)"
     r"([A-Za-z0-9][A-Za-z0-9_-]*)(?:\.md)?",
@@ -225,6 +247,8 @@ def p4(root: Path, errors: list[str]) -> None:
         for field in ("evidence_id", "captured_at_utc", "path", "sha256", "redaction_status", "observation"):
             if not meaningful(row.get(field)):
                 errors.append(f"evidence-ledger.csv line {index}: missing {field}")
+    reviews = read_critical_reviews(root, errors)
+    validate_critical_reviews(reviews, tests, evidence_ids, errors)
 
 
 def p5(root: Path, errors: list[str]) -> None:
@@ -254,6 +278,90 @@ def p5(root: Path, errors: list[str]) -> None:
         for evidence_id in split_ids(row.get("evidence_ids", "")):
             if evidence_id not in evidence_ids:
                 errors.append(f"finding {row.get('finding_id')} references unknown {evidence_id}")
+    reviews = read_critical_reviews(root, errors)
+    validate_critical_reviews(reviews, tests, evidence_ids, errors, findings=findings)
+
+
+def read_critical_reviews(root: Path, errors: list[str]) -> list[dict[str, str]]:
+    header_error = validate_ledger_header(root / "critical-review.csv", CSV_TEMPLATES["critical-review.csv"])
+    if header_error:
+        errors.append(header_error)
+        return []
+    try:
+        return read_csv(root / "critical-review.csv")
+    except ValueError as exc:
+        errors.append(str(exc))
+        return []
+
+
+def validate_critical_reviews(
+    reviews: list[dict[str, str]],
+    tests: list[dict[str, str]],
+    evidence_ids: set[str],
+    errors: list[str],
+    *,
+    findings: list[dict[str, str]] | None = None,
+) -> None:
+    """Enforce one bounded adversarial review per finalized test and finding."""
+    test_by_id = {row.get("test_id", ""): row for row in tests if row.get("test_id")}
+    reviews_by_test: dict[str, dict[str, str]] = {}
+    for index, row in enumerate(reviews, 2):
+        for field in REVIEW_REQUIRED_FIELDS:
+            if not meaningful(row.get(field)):
+                errors.append(f"critical-review.csv line {index}: missing {field}")
+        test_id = row.get("test_id", "")
+        if test_id not in test_by_id:
+            errors.append(f"critical-review.csv line {index}: test_id '{test_id}' not found in test-matrix.csv")
+        elif test_id in reviews_by_test:
+            errors.append(f"critical-review.csv line {index}: duplicate review for test_id '{test_id}'")
+        else:
+            reviews_by_test[test_id] = row
+            expected_hypothesis = test_by_id[test_id].get("hypothesis_id", "")
+            if row.get("hypothesis_id") != expected_hypothesis:
+                errors.append(
+                    f"critical-review.csv line {index}: hypothesis_id does not match test {test_id}"
+                )
+            for evidence_id in split_ids(row.get("evidence_ids", "")):
+                if evidence_id not in evidence_ids:
+                    errors.append(f"critical-review.csv line {index}: unknown evidence_id '{evidence_id}'")
+            decision = row.get("decision", "")
+            if decision not in REVIEW_DECISIONS:
+                errors.append(f"critical-review.csv line {index}: invalid decision '{decision}'")
+            expected_decision = REVIEW_DECISION_BY_STATUS.get(test_by_id[test_id].get("status", ""))
+            if expected_decision and decision and decision != expected_decision:
+                errors.append(
+                    f"critical-review.csv line {index}: decision '{decision}' does not match test status "
+                    f"'{test_by_id[test_id].get('status')}'"
+                )
+            if test_by_id[test_id].get("status") == "confirmed":
+                test_evidence = split_ids(test_by_id[test_id].get("evidence_ids", ""))
+                review_evidence = split_ids(row.get("evidence_ids", ""))
+                if not test_evidence.issubset(review_evidence):
+                    errors.append(
+                        f"critical-review.csv line {index}: confirmed test {test_id} review must include its evidence_ids"
+                    )
+
+    for test in tests:
+        if test.get("status") in FINAL_TEST_STATES and test.get("test_id") not in reviews_by_test:
+            errors.append(
+                f"critical-review.csv needs one review for finalized test {test.get('test_id') or '<missing>'}"
+            )
+
+    if findings is None:
+        return
+
+    finding_ids = {row.get("finding_id", "") for row in findings if row.get("finding_id")}
+    for index, row in enumerate(reviews, 2):
+        finding_id = row.get("finding_id", "")
+        if finding_id and finding_id not in finding_ids:
+            errors.append(f"critical-review.csv line {index}: finding_id '{finding_id}' not found in findings-index.csv")
+    for finding in findings:
+        finding_id = finding.get("finding_id", "")
+        linked = [row for row in reviews if row.get("finding_id") == finding_id]
+        if not linked:
+            errors.append(f"critical-review.csv needs a linked review for finding {finding_id or '<missing>'}")
+        elif not any(row.get("decision") == "retain" for row in linked):
+            errors.append(f"critical-review.csv finding {finding_id} needs a review with decision 'retain'")
 
 
 def p6(root: Path, errors: list[str]) -> None:
@@ -304,6 +412,8 @@ def main() -> int:
     try:
         state = read_json(root / "state.json")
         for name, headers in CSV_TEMPLATES.items():
+            if name == "critical-review.csv":
+                continue
             header_error = validate_ledger_header(root / name, headers)
             if header_error:
                 errors.append(header_error)

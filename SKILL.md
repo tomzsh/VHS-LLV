@@ -255,15 +255,15 @@ It cannot authorize an asset absent from `engagement.json`.
 | P1-research | pull disclosed hacktivity/writeups for the target stack | `research-stage.md` | `research/` digest + ledger |
 | P2 | map authorized surfaces | `p2-recon.md`, `taxonomy-rating.md` | asset and surface inventories |
 | P2-mobile | static-analyze an in-scope Android app | `module-android-apk.md` (via `apk_recon.sh`) | decompile + exported/secret/endpoint report |
-| P3 | design controlled tests | `p3-test-design.md`, `attack-playbooks/00-index.md` | test matrix |
+| P3 | design controlled tests | `p3-test-design.md`, `attack-playbooks/00-index.md`, `critical-review-loop.md` when sharpening a hypothesis | test matrix |
 
 P3 gate now **enforces playbook grounding**: `gate_check.py --phase P3` fails until
 `--mark-playbooks` has set `state.json playbooks_loaded=true` (run it after reading
 `attack-playbooks/00-index.md`), and every `test-matrix.csv` row must cite a playbook in
 its `notes` column (e.g. `notes='playbook: sqli'` or `attack-playbooks/<name>.md`).
 
-| P4 | validate with controls | `p4-validation.md` | evidence ledger |
-| P5 | root cause and severity | `p5-triage.md`, `taxonomy-rating.md`, `bountyforge-judging.md`, `bountyforge-cvss.md` | findings index |
+| P4 | validate with controls | `p4-validation.md`, `evidence-standard.md`, `critical-review-loop.md` | evidence ledger + critical review |
+| P5 | root cause and severity | `p5-triage.md`, `taxonomy-rating.md`, `bountyforge-judging.md`, `bountyforge-cvss.md`, `critical-review-loop.md` | findings index + critical review |
 
 P5 chaining (composite A→B→C severity) is available once findings exist:
 
@@ -274,6 +274,15 @@ python3 <skill-dir>/scripts/kill_chain_vhs.py ./engagement \
 (reads `findings-index.csv`, writes `kill-chains.md`; ported from
 BountyForge `kill_chain.py`.)
 | P6 | report, disclose, retest | `p6-report-retest.md` | final report |
+
+## Critical review loop
+
+Load `references/critical-review-loop.md` only for P3–P5 hypothesis, validation,
+or triage decisions. P4 requires one bounded review for every finalized test;
+P5 requires every finding to link to a `retain` review. The loop records the
+claim, evidence, alternative explanation, disconfirming test, control,
+scope/impact, uncertainty, and decision. It is not a reason to repeat prose
+for every reconnaissance result or to bypass authorization and scope gates.
 
 ## GraphQL and Code Graph routing
 
@@ -374,6 +383,8 @@ full descriptions into every engagement.
   `references/taxonomy-rating.md` (includes the priority-1/2 hunting checklist).
 - `references/officecli-reporting.md` — generate `.docx`/`.xlsx`/`.pptx`
   deliverables from redacted ledgers at P6 via the `officecli` binary.
+- `references/critical-review-loop.md` — bounded P3–P5 adversarial review for
+  claims, alternatives, disconfirmation, controls, scope/impact, and uncertainty.
 - `references/bountyforge-judging.md` — 4-gate finding evaluation (Refutation
   → Reachability → Trigger → Impact) + severity adjustment + LEAD promotion,
   ported from BountyForge (P5).

@@ -22,9 +22,9 @@ Load `references/non-qualifying.md` before classifying a finding and load
 | P1 research | this phase plus `research-stage.md` |
 | P2 recon | `p2-recon.md`, `taxonomy-rating.md`, matching target module |
 | P2 Android | `module-android-apk.md`; `tool-catalog.md` only when using its launcher |
-| P3 test design | `p3-test-design.md`, `attack-playbooks/00-index.md`, then only the selected playbook(s) |
-| P4 validation | `p4-validation.md`, `evidence-standard.md`, then the selected playbook(s) |
-| P5 triage | `p5-triage.md`, `taxonomy-rating.md`, and the applicable judging/CVSS references |
+| P3 test design | `p3-test-design.md`, `attack-playbooks/00-index.md`, `critical-review-loop.md` when sharpening a hypothesis, then only the selected playbook(s) |
+| P4 validation | `p4-validation.md`, `evidence-standard.md`, `critical-review-loop.md`, then the selected playbook(s) |
+| P5 triage | `p5-triage.md`, `taxonomy-rating.md`, `critical-review-loop.md`, and the applicable judging/CVSS references |
 | P6 reporting | `p6-report-retest.md`, `reporting-templates.md`; load `officecli-reporting.md` only for Office deliverables |
 
 ## Progressive playbook loading
