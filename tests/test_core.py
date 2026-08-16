@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import os
 import subprocess
@@ -172,6 +173,61 @@ class EngagementCliTests(unittest.TestCase):
                 text=True, capture_output=True, timeout=30, check=False,
             )
             self.assertEqual(gate.returncode, 0, gate.stdout + gate.stderr)
+
+
+class EvidenceCaptureTests(unittest.TestCase):
+    def create_evidence_ledger(self, root: Path) -> None:
+        (root / "evidence" / "raw").mkdir(parents=True)
+        (root / "evidence" / "redacted").mkdir()
+        with (root / "evidence-ledger.csv").open("w", newline="", encoding="utf-8") as fh:
+            csv.writer(fh).writerow(LEDGER_SCHEMAS["evidence-ledger.csv"])
+
+    def test_capture_names_are_unique_and_hashes_remain_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.create_evidence_ledger(root)
+            first = root / "first"
+            second = root / "second"
+            first.mkdir()
+            second.mkdir()
+            (first / "response.json").write_text("first", encoding="utf-8")
+            (second / "response.json").write_text("second", encoding="utf-8")
+            for evidence_id, source in (("EV-001", first / "response.json"), ("EV-002", second / "response.json")):
+                result = subprocess.run(
+                    [
+                        sys.executable, str(SCRIPTS / "evidence_capture.py"), str(root),
+                        "--evidence-id", evidence_id, "--asset", "AST-001",
+                        "--observation", evidence_id, "--file", str(source),
+                    ],
+                    text=True, capture_output=True, check=False, timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+            with (root / "evidence-ledger.csv").open(encoding="utf-8", newline="") as fh:
+                rows = list(csv.DictReader(fh))
+            self.assertEqual(len({row["path"] for row in rows}), 2)
+            for row in rows:
+                artifact = root / row["path"]
+                self.assertEqual(hashlib.sha256(artifact.read_bytes()).hexdigest(), row["sha256"])
+
+    def test_header_mismatch_fails_without_replacing_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "evidence" / "raw").mkdir(parents=True)
+            (root / "evidence" / "redacted").mkdir()
+            ledger = root / "evidence-ledger.csv"
+            ledger.write_text("wrong,header\nkeep,this\n", encoding="utf-8")
+            source = root / "response.txt"
+            source.write_text("payload", encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPTS / "evidence_capture.py"), str(root),
+                    "--evidence-id", "EV-001", "--asset", "AST-001",
+                    "--observation", "test", "--file", str(source),
+                ],
+                text=True, capture_output=True, check=False, timeout=30,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(ledger.read_text(encoding="utf-8"), "wrong,header\nkeep,this\n")
 
 
 class OrchestratorTests(unittest.TestCase):

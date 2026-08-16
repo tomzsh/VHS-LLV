@@ -35,11 +35,21 @@ from __future__ import annotations
 
 import argparse
 import csv
+import fcntl
 import hashlib
+import os
+import re
 import shutil
 import sys
+import tempfile
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+
+from schemas import LEDGER_SCHEMAS
+
+
+EVIDENCE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 def utc_now() -> str:
@@ -48,6 +58,34 @@ def utc_now() -> str:
 
 def sha256_of(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def safe_artifact_name(evidence_id: str, source_name: str) -> str:
+    if not EVIDENCE_ID_RE.fullmatch(evidence_id):
+        raise ValueError("--evidence-id must be a single safe identifier")
+    name = Path(source_name).name
+    if not name or name in {".", ".."}:
+        raise ValueError("evidence source must have a filename")
+    return f"{evidence_id}-{name}"
+
+
+def owner_only(path: Path, mode: int) -> None:
+    try:
+        path.chmod(mode)
+    except OSError:
+        pass
+
+
+@contextmanager
+def ledger_lock(root: Path):
+    lock_path = root / ".evidence-ledger.lock"
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        owner_only(lock_path, 0o600)
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def existing_evidence_ids(root: Path) -> set[str]:
@@ -59,27 +97,56 @@ def existing_evidence_ids(root: Path) -> set[str]:
     return {r[0] for r in rows[1:] if r}
 
 
-def append_ledger(root: Path, row: list[str]) -> None:
+def append_ledger_locked(root: Path, row: list[str]) -> None:
     path = root / "evidence-ledger.csv"
-    header = ["evidence_id", "captured_at_utc", "hypothesis_id", "test_id",
-              "finding_id", "asset_id", "path", "sha256", "sensitivity",
-              "redaction_status", "observation", "cleanup_status"]
+    header = LEDGER_SCHEMAS["evidence-ledger.csv"]
     rows: list[list[str]] = []
     if path.exists():
         with path.open(encoding="utf-8", newline="") as fh:
             rows = list(csv.reader(fh))
-        if rows and rows[0] != header:
-            # tolerate pre-existing header variants only if first row = header
-            print(f"[!] evidence-ledger.csv header mismatch; not appending", file=sys.stderr)
-            shutil.copy(path, root / "evidence-ledger.csv.bak")
-            print(f"[!] backed up to evidence-ledger.csv.bak", file=sys.stderr)
-            rows = [header]
+        if not rows or rows[0] != header:
+            raise ValueError("evidence-ledger.csv header mismatch; not appending")
     else:
         rows = [header]
     rows.append(row)
-    with path.open("w", encoding="utf-8", newline="") as fh:
-        csv.writer(fh).writerows(rows)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=".evidence-ledger.", suffix=".tmp", dir=root, text=True,
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+            csv.writer(fh).writerows(rows)
+            fh.flush()
+            os.fsync(fh.fileno())
+        owner_only(temp_path, 0o600)
+        os.replace(temp_path, path)
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
     print(f"[+] appended {row[0]} to evidence-ledger.csv")
+
+
+def append_ledger(root: Path, row: list[str]) -> None:
+    with ledger_lock(root):
+        append_ledger_locked(root, row)
+
+
+def copy_exclusive(source: Path, destination: Path) -> None:
+    try:
+        with source.open("rb") as src, destination.open("xb") as dst:
+            shutil.copyfileobj(src, dst)
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        raise
+
+
+def write_stdin_exclusive(destination: Path) -> None:
+    try:
+        with destination.open("xb") as dst:
+            shutil.copyfileobj(sys.stdin.buffer, dst)
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        raise
 
 
 def main() -> int:
@@ -98,62 +165,77 @@ def main() -> int:
     args = ap.parse_args()
 
     root = Path(args.engagement_dir).expanduser().resolve()
+    evidence_dir = root / "evidence"
     raw_dir = root / "evidence" / "raw"
     red_dir = root / "evidence" / "redacted"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
     raw_dir.mkdir(parents=True, exist_ok=True)
     red_dir.mkdir(parents=True, exist_ok=True)
+    for directory in (evidence_dir, raw_dir, red_dir):
+        owner_only(directory, 0o700)
 
     if bool(args.file) == bool(args.stdin):
         print("[!] provide exactly one of --file or --stdin", file=sys.stderr)
         return 1
-
-    # Reject duplicate evidence ids BEFORE writing any file, so a rejected
-    # capture never leaves an orphan raw artifact behind.
-    if args.evidence_id in existing_evidence_ids(root):
-        print(f"[!] evidence id {args.evidence_id} already present in "
-              f"evidence-ledger.csv; choose a unique --evidence-id", file=sys.stderr)
-        return 2
 
     if args.file:
         src = Path(args.file).expanduser().resolve()
         if not src.is_file():
             print(f"[!] source file not found: {src}", file=sys.stderr)
             return 1
-        name = src.name
-        dst_raw = raw_dir / name
-        shutil.copy2(src, dst_raw)
+        source_name = src.name
     else:
-        name = args.stdin
-        dst_raw = raw_dir / name
-        dst_raw.write_bytes(sys.stdin.buffer.read())
+        src = None
+        source_name = args.stdin
 
-    # Raw evidence may contain unredacted PII / secrets — lock it down to the
-    # owner only (SKILL.md: "Preserve raw evidence ... with restrictive
-    # permissions"). Best-effort: chmod is a no-op on filesystems without it.
     try:
-        dst_raw.chmod(0o600)
-    except OSError:
-        pass
+        name = safe_artifact_name(args.evidence_id, source_name)
+    except ValueError as exc:
+        print(f"[!] {exc}", file=sys.stderr)
+        return 2
 
-    digest = sha256_of(dst_raw)
+    dst_raw = raw_dir / name
+    red_copy = red_dir / name
+    raw_created = False
+    redacted_created = False
+    try:
+        with ledger_lock(root):
+            # The lock covers duplicate validation, artifact creation, and
+            # ledger replacement, so competing captures cannot share an ID.
+            if args.evidence_id in existing_evidence_ids(root):
+                raise ValueError(
+                    f"evidence id {args.evidence_id} already present in "
+                    "evidence-ledger.csv; choose a unique --evidence-id"
+                )
+            if src is not None:
+                copy_exclusive(src, dst_raw)
+            else:
+                write_stdin_exclusive(dst_raw)
+            raw_created = True
+            owner_only(dst_raw, 0o600)
+            digest = sha256_of(dst_raw)
 
-    # redacted copy
-    if args.redacted:
-        red_status = "already_redacted"
-    else:
-        red_copy = red_dir / name
-        shutil.copy2(dst_raw, red_copy)
-        try:
-            red_copy.chmod(0o600)
-        except OSError:
-            pass
-        red_status = "redacted_copy_created"
+            if args.redacted:
+                red_status = "already_redacted"
+            else:
+                copy_exclusive(dst_raw, red_copy)
+                redacted_created = True
+                owner_only(red_copy, 0o600)
+                red_status = "redacted_copy_created"
 
-    rel = dst_raw.relative_to(root)
-    row = [args.evidence_id, utc_now(), args.hypothesis, args.test, args.finding,
-           args.asset, str(rel), digest, args.sensitivity, red_status,
-           args.observation, "keep"]
-    append_ledger(root, row)
+            rel = dst_raw.relative_to(root)
+            row = [args.evidence_id, utc_now(), args.hypothesis, args.test, args.finding,
+                   args.asset, str(rel), digest, args.sensitivity, red_status,
+                   args.observation, "keep"]
+            append_ledger_locked(root, row)
+    except (OSError, ValueError) as exc:
+        if redacted_created:
+            red_copy.unlink(missing_ok=True)
+        if raw_created:
+            dst_raw.unlink(missing_ok=True)
+        print(f"[!] {exc}", file=sys.stderr)
+        return 2
+
     print(f"[+] raw:     {dst_raw}")
     print(f"[+] sha256:  {digest}")
     return 0
