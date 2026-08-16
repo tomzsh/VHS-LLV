@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import re
@@ -283,6 +284,59 @@ SPECIAL_DETECT = {
 }
 
 
+def detect_present(name: str) -> bool:
+    """Report whether a tool's configured files exist without executing it."""
+    if name not in SPECIAL_DETECT:
+        return shutil.which(name) is not None
+
+    script_dir = Path(__file__).parent
+    if name == "scrapling":
+        launcher = script_dir / "scrapling_crawl.sh"
+        override = os.environ.get("VHS_SCRAPLING_PYTHON")
+        python_bin = Path(override).expanduser() if override else (
+            Path(os.environ.get("VHS_SCRAPLING_HOME", "~/tools/scrapling/venv")).expanduser() / "bin" / "python"
+        )
+        return launcher.is_file() and python_bin.is_file() and os.access(python_bin, os.X_OK)
+    if name == "crawl4ai":
+        launcher = script_dir / "crawl4ai_crawl.sh"
+        override = os.environ.get("VHS_CRAWL4AI_PYTHON")
+        python_bin = Path(override).expanduser() if override else (
+            Path(os.environ.get("VHS_CRAWL4AI_HOME", "~/tools/crawl4ai")).expanduser() / "bin" / "python"
+        )
+        return launcher.is_file() and python_bin.is_file() and os.access(python_bin, os.X_OK)
+    if name == "wafw00f":
+        home = Path(os.environ.get("VHS_WAFW00F_HOME", "~/tools/wafw00f")).expanduser()
+        return (script_dir / "wafw00f.sh").is_file() and (home / "bin" / "wafw00f").is_file()
+    if name in {"sqlmap", "paramspider"}:
+        env_key = f"VHS_{name.upper()}_HOME"
+        home = Path(os.environ.get(env_key, f"~/tools/{name}")).expanduser()
+        return (script_dir / f"{name}.sh").is_file() and (home / "bin" / name).is_file()
+    if name == "nikto":
+        home = Path(os.environ.get("VHS_NIKTO_HOME", "~/tools/nikto")).expanduser()
+        return (script_dir / "nikto.sh").is_file() and (home / "program" / "nikto.pl").is_file()
+    if name == "theHarvester":
+        home = Path(os.environ.get("VHS_THEHARVESTER_HOME", "~/tools/theHarvester")).expanduser()
+        return (home / "bin" / "theHarvester").is_file()
+    if name == "graphql-cop":
+        home = Path(os.environ.get("VHS_GRAPHQL_COP_HOME", "~/tools/graphql-cop")).expanduser()
+        python_bin = home / "venv" / "bin" / "python"
+        return (
+            (script_dir / "graphql_cop.sh").is_file()
+            and python_bin.is_file()
+            and os.access(python_bin, os.X_OK)
+            and (home / "graphql-cop.py").is_file()
+        )
+    if name == "code-graph-rag":
+        override = os.environ.get("VHS_CODE_GRAPH_RAG_BIN")
+        binary = Path(override).expanduser() if override else Path(shutil.which("cgr") or "").expanduser()
+        if not binary.is_file() and not override:
+            fallback = Path("~/.local/bin/cgr").expanduser()
+            binary = fallback if fallback.is_file() else Path(shutil.which("code-graph-rag") or "")
+        return (script_dir / "code_graph_rag.sh").is_file() and binary.is_file() and os.access(binary, os.X_OK)
+    return False
+
+
+@functools.lru_cache(maxsize=None)
 def detect(name: str) -> tuple[bool, str]:
     """Binary lookup for CLIs, module/venv lookup for the python crawlers."""
     if name in SPECIAL_DETECT:
@@ -324,7 +378,7 @@ def main() -> int:
         for name in names:
             if name in SPECIAL_DETECT:
                 ok, note = detect(name)
-                verification[name] = {"present": True, "ok": ok, "note": note}
+                verification[name] = {"present": detect_present(name), "ok": ok, "note": note}
                 if not args.json:
                     print(f"  [verify] {name:18s} {'OK' if ok else 'FAIL':4s} {note}")
                 continue

@@ -160,6 +160,42 @@ class ToolCheckTests(unittest.TestCase):
             self.assertTrue(result["agents"]["graphql"]["optional"]["graphql-cop"])
             self.assertTrue(result["verification"]["graphql-cop"]["ok"])
 
+    def test_check_tools_reports_missing_graphql_cop_as_not_present(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            process = subprocess.run(
+                [
+                    sys.executable, str(SCRIPTS / "check_tools.py"),
+                    "--profile", "active-safe", "--verify", "--json",
+                ],
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+                env={**os.environ, "VHS_GRAPHQL_COP_HOME": str(Path(temp) / "missing")},
+            )
+            self.assertEqual(process.returncode, 0, process.stderr)
+            result = json.loads(process.stdout)
+            self.assertFalse(result["verification"]["graphql-cop"]["present"])
+            self.assertFalse(result["verification"]["graphql-cop"]["ok"])
+
+    def test_detect_cache_calls_special_probe_once(self) -> None:
+        import check_tools
+
+        calls = []
+        original = check_tools.SPECIAL_DETECT.get("cache-test")
+        check_tools.SPECIAL_DETECT["cache-test"] = lambda: (calls.append(True) or (True, "ok"))
+        check_tools.detect.cache_clear()
+        try:
+            self.assertEqual(check_tools.detect("cache-test"), (True, "ok"))
+            self.assertEqual(check_tools.detect("cache-test"), (True, "ok"))
+            self.assertEqual(len(calls), 1)
+        finally:
+            if original is None:
+                check_tools.SPECIAL_DETECT.pop("cache-test", None)
+            else:
+                check_tools.SPECIAL_DETECT["cache-test"] = original
+            check_tools.detect.cache_clear()
+
     def test_code_graph_launcher_honors_binary_override(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             log = Path(temp) / "args.log"
