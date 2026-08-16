@@ -14,8 +14,8 @@ CONFIG = json.loads((Path(__file__).resolve().parents[1] / "config" / "tools.jso
 PROFILE_AGENTS = {
     "plan-only": ("report",),
     "passive-osint": ("recon", "crawl", "report"),
-    "active-safe": ("recon", "crawl", "mobile", "report"),
-    "scanner-safe": ("recon", "crawl", "discovery", "scan", "mobile", "report"),
+    "active-safe": ("recon", "crawl", "graphql", "sast", "mobile", "report"),
+    "scanner-safe": ("recon", "crawl", "graphql", "sast", "discovery", "scan", "mobile", "report"),
 }
 PROBE = {
     "subfinder": ("-version", False),
@@ -130,7 +130,7 @@ def wafw00f_ok() -> tuple[bool, str]:
     if not launcher.exists():
         return False, "launcher missing"
     override = os.environ.get("VHS_WAFW00F_HOME")
-    venv_home = Path(override).expanduser() if override else Path("~/tools/wafw00f")
+    venv_home = Path(override).expanduser() if override else Path("~/tools/wafw00f").expanduser()
     binary = venv_home / "bin" / "wafw00f"
     if not binary.exists():
         return False, f"venv binary missing ({binary})"
@@ -149,7 +149,7 @@ def wafw00f_ok() -> tuple[bool, str]:
 def venv_bin_ok(name: str, default_home: str, env_key: str, probe_arg: str = "--version") -> tuple[bool, str]:
     """Check a tool installed in a dedicated venv (PEP 668-safe pattern)."""
     override = os.environ.get(env_key)
-    home = Path(override).expanduser() if override else Path(default_home)
+    home = Path(override).expanduser() if override else Path(default_home).expanduser()
     binary = home / "bin" / name
     if not binary.exists():
         return False, f"venv binary missing ({binary})"
@@ -176,7 +176,7 @@ def paramspider_ok() -> tuple[bool, str]:
 
 def nikto_ok() -> tuple[bool, str]:
     override = os.environ.get("VHS_NIKTO_HOME")
-    home = Path(override).expanduser() if override else Path("~/tools/nikto")
+    home = Path(override).expanduser() if override else Path("~/tools/nikto").expanduser()
     program = home / "program" / "nikto.pl"
     if not program.exists():
         return False, f"nikto.pl missing ({program})"
@@ -193,6 +193,83 @@ def nikto_ok() -> tuple[bool, str]:
     return ok, out.strip().splitlines()[0][:80] if out.strip() else "probe failed"
 
 
+def theharvester_ok() -> tuple[bool, str]:
+    """theHarvester lives in its own py3.12 venv (PyPI 0.0.1 placeholder is
+    broken — real tool installed from github.com/laramies/theHarvester)."""
+    override = os.environ.get("VHS_THEHARVESTER_HOME")
+    home = Path(override).expanduser() if override else Path("~/tools/theHarvester").expanduser()
+    binary = home / "bin" / "theHarvester"
+    if not binary.exists():
+        return False, f"venv binary missing ({binary})"
+    try:
+        proc = subprocess.run(
+            [str(binary), "-h"], capture_output=True, timeout=25, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False, "venv probe failed"
+    out = (proc.stdout + proc.stderr).decode("utf-8", "replace")
+    ok = proc.returncode == 0
+    note = ""
+    for line in out.splitlines():
+        if "theharvester" in line.lower() or "usage" in line.lower() or line.startswith("Read"):
+            note = line[:80]; break
+    if not note and out.strip():
+        note = out.strip().splitlines()[0][:80]
+    return ok, note if ok else (note or "probe failed")
+
+
+def graphql_cop_ok() -> tuple[bool, str]:
+    """Check the dedicated local GraphQL Cop venv without using global Python."""
+    override = os.environ.get("VHS_GRAPHQL_COP_HOME")
+    home = Path(override).expanduser() if override else Path("~/tools/graphql-cop").expanduser()
+    launcher = Path(__file__).parent / "graphql_cop.sh"
+    python_bin = home / "venv" / "bin" / "python"
+    script = home / "graphql-cop.py"
+    if not launcher.exists():
+        return False, "launcher missing"
+    if not python_bin.is_file() or not os.access(python_bin, os.X_OK):
+        return False, f"venv Python missing ({python_bin})"
+    if not script.is_file():
+        return False, f"graphql-cop.py missing ({script})"
+    try:
+        proc = subprocess.run(
+            ["env", "-u", "PYTHONPATH", str(python_bin), str(script), "--version"],
+            capture_output=True, timeout=20, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False, "GraphQL Cop probe failed"
+    output = (proc.stdout + proc.stderr).decode("utf-8", "replace").strip()
+    ok = proc.returncode == 0 and "version" in output.lower()
+    return ok, output.splitlines()[0][:80] if output else f"exit={proc.returncode}"
+
+
+def code_graph_ok() -> tuple[bool, str]:
+    """Check the local Code-Graph-RAG CLI without importing it into Hermes."""
+    override = os.environ.get("VHS_CODE_GRAPH_RAG_BIN")
+    if override:
+        binary = Path(override).expanduser()
+    else:
+        binary = Path(shutil.which("cgr") or "").expanduser()
+        if not binary.is_file():
+            fallback = Path("~/.local/bin/cgr").expanduser()
+            binary = fallback if fallback.is_file() else Path(shutil.which("code-graph-rag") or "")
+    launcher = Path(__file__).parent / "code_graph_rag.sh"
+    if not launcher.exists():
+        return False, "launcher missing"
+    if not binary.is_file() or not os.access(binary, os.X_OK):
+        return False, "cgr binary not found"
+    last_output = ""
+    for command in ((str(binary), "--version"), (str(binary), "--help")):
+        try:
+            proc = subprocess.run(command, capture_output=True, timeout=30, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        last_output = (proc.stdout + proc.stderr).decode("utf-8", "replace").strip()
+        if proc.returncode == 0:
+            return True, last_output.splitlines()[0][:80] if last_output else "cgr ok"
+    return False, last_output.splitlines()[0][:80] if last_output else "cgr probe failed"
+
+
 SPECIAL_DETECT = {
     "scrapling": scrapling_ok,
     "crawl4ai": crawl4ai_ok,
@@ -200,6 +277,9 @@ SPECIAL_DETECT = {
     "sqlmap": sqlmap_ok,
     "paramspider": paramspider_ok,
     "nikto": nikto_ok,
+    "theHarvester": theharvester_ok,
+    "graphql-cop": graphql_cop_ok,
+    "code-graph-rag": code_graph_ok,
 }
 
 

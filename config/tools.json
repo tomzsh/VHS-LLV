@@ -7,6 +7,14 @@
     "required_any": [],
     "optional": ["katana", "gau", "waymore", "scrapling", "crawl4ai", "jsluice"]
   },
+  "graphql": {
+    "required_any": [],
+    "optional": ["graphql-cop"]
+  },
+  "sast": {
+    "required_any": [],
+    "optional": ["code-graph-rag"]
+  },
   "discovery": {
     "required_any": [],
     "optional": ["ffuf", "arjun", "gf", "uro", "wafw00f", "gobuster", "feroxbuster", "paramspider", "nikto", "sqlmap"]

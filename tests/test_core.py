@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,39 @@ from policy import PolicyError, ScopePolicy, authorize_run  # noqa: E402
 from api_auth_probe import resolve_endpoint, state_change_allowed  # noqa: E402
 from schemas import LEDGER_SCHEMAS, create_missing_ledgers  # noqa: E402
 from vulnhunter_orchestrator import Step, authorization_fingerprint, stage  # noqa: E402
+
+
+class ReferenceIntegrityTests(unittest.TestCase):
+    def test_web2_2026_reference_is_routed_and_cited(self) -> None:
+        doc = (SKILL / "references" / "web2-2026-references.md").read_text(encoding="utf-8")
+        router = (SKILL / "references" / "context-router.md").read_text(encoding="utf-8")
+        index = (SKILL / "references" / "index.md").read_text(encoding="utf-8")
+        skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("version: 2.6.0", skill)
+        self.assertIn("web2-2026-references.md", router)
+        self.assertIn("web2-2026-references.md", index)
+        for term in (
+            "ATO", "IDOR", "business logic", "SQL injection", "NoSQL injection",
+            "SSTI", "CSRF", "deserialization", "TOCTOU", "privilege escalation",
+            "fail-open", "canonicalization", "configuration",
+        ):
+            self.assertIn(term, doc)
+        for cve in (
+            "CVE-2026-33385", "CVE-2026-3021", "CVE-2026-22265",
+            "CVE-2026-15734", "CVE-2026-26718", "CVE-2026-43633",
+            "CVE-2026-25728", "CVE-2026-19598", "CVE-2026-72856",
+            "CVE-2026-49819", "CVE-2026-73421", "CVE-2026-37525",
+            "CVE-2026-28498", "CVE-2026-53976", "CVE-2026-2311",
+        ):
+            self.assertIn(cve, doc)
+        citations = {int(value) for value in re.findall(r"\[(\d+)\]", doc)}
+        self.assertGreaterEqual(len(citations), 40)
+        self.assertIn("## Sources", doc)
+
+    def test_web2_reference_has_no_patch_artifact(self) -> None:
+        for name in ("references/web2-2026-references.md", "references/index.md"):
+            text = (SKILL / name).read_text(encoding="utf-8")
+            self.assertNotRegex(text, r"^\+", msg=name)
 
 
 class SchemaTests(unittest.TestCase):
@@ -67,6 +101,185 @@ class ToolCheckTests(unittest.TestCase):
             env={**os.environ, "VHS_CRAWL4AI_PYTHON": "/bin/true"},
         )
         self.assertEqual(process.returncode, 0, process.stderr)
+
+    def test_graphql_cop_launcher_honors_home_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp) / "graphql-cop"
+            python_bin = home / "venv" / "bin" / "python"
+            python_bin.parent.mkdir(parents=True)
+            log = Path(temp) / "args.log"
+            python_bin.write_text(
+                "#!/usr/bin/env bash\n"
+                f"printf '%s\\n' \"$@\" > {str(log)!r}\n",
+                encoding="utf-8",
+            )
+            python_bin.chmod(0o700)
+            (home / "graphql-cop.py").write_text("# fake\n", encoding="utf-8")
+            process = subprocess.run(
+                [
+                    "bash", str(SCRIPTS / "graphql_cop.sh"),
+                    "-t", "https://example.com/graphql", "-o", "json",
+                ],
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+                env={**os.environ, "VHS_GRAPHQL_COP_HOME": str(home)},
+            )
+            self.assertEqual(process.returncode, 0, process.stderr)
+            args = log.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(args[0], str(home / "graphql-cop.py"))
+            self.assertIn("https://example.com/graphql", args)
+            self.assertIn("json", args)
+
+    def test_check_tools_reports_graphql_cop_from_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp) / "graphql-cop"
+            python_bin = home / "venv" / "bin" / "python"
+            python_bin.parent.mkdir(parents=True)
+            python_bin.write_text(
+                "#!/usr/bin/env bash\n"
+                "if [ \"$2\" = \"--version\" ]; then printf 'version: 1.15\\n'; fi\n",
+                encoding="utf-8",
+            )
+            python_bin.chmod(0o700)
+            (home / "graphql-cop.py").write_text("# fake\n", encoding="utf-8")
+            process = subprocess.run(
+                [
+                    sys.executable, str(SCRIPTS / "check_tools.py"),
+                    "--profile", "active-safe", "--verify", "--json",
+                ],
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+                env={**os.environ, "VHS_GRAPHQL_COP_HOME": str(home)},
+            )
+            self.assertEqual(process.returncode, 0, process.stderr)
+            result = json.loads(process.stdout)
+            self.assertTrue(result["agents"]["graphql"]["optional"]["graphql-cop"])
+            self.assertTrue(result["verification"]["graphql-cop"]["ok"])
+
+    def test_code_graph_launcher_honors_binary_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            log = Path(temp) / "args.log"
+            binary = Path(temp) / "cgr"
+            binary.write_text(
+                "#!/usr/bin/env bash\n"
+                f"printf '%s\\n' \"$@\" > {str(log)!r}\n",
+                encoding="utf-8",
+            )
+            binary.chmod(0o700)
+            process = subprocess.run(
+                [
+                    "bash", str(SCRIPTS / "code_graph_rag.sh"),
+                    "start", "--repo-path", "/tmp/repo", "--update-graph",
+                ],
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+                env={**os.environ, "VHS_CODE_GRAPH_RAG_BIN": str(binary)},
+            )
+            self.assertEqual(process.returncode, 0, process.stderr)
+            args = log.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(args, ["start", "--repo-path", "/tmp/repo", "--update-graph"])
+
+    def test_check_tools_reports_code_graph_from_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            binary = Path(temp) / "cgr"
+            binary.write_text(
+                "#!/usr/bin/env bash\n"
+                "if [ \"$1\" = \"--version\" ]; then printf 'cgr 0.0.658\\n'; else printf 'help\\n'; fi\n",
+                encoding="utf-8",
+            )
+            binary.chmod(0o700)
+            process = subprocess.run(
+                [
+                    sys.executable, str(SCRIPTS / "check_tools.py"),
+                    "--profile", "active-safe", "--verify", "--json",
+                ],
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+                env={**os.environ, "VHS_CODE_GRAPH_RAG_BIN": str(binary)},
+            )
+            self.assertEqual(process.returncode, 0, process.stderr)
+            result = json.loads(process.stdout)
+            self.assertTrue(result["agents"]["sast"]["optional"]["code-graph-rag"])
+            self.assertTrue(result["verification"]["code-graph-rag"]["ok"])
+
+    def test_code_graph_grounding_rejects_unknown_nodes_and_edges(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            graph = root / "graph.json"
+            claims = root / "claims.json"
+            graph.write_text(json.dumps({
+                "metadata": {"project": "fixture"},
+                "nodes": [
+                    {"node_id": 1, "labels": ["Function"], "properties": {
+                        "qualified_name": "app.auth.login", "path": "app.py",
+                        "start_line": 1, "end_line": 4,
+                    }},
+                    {"node_id": 2, "labels": ["Resource"], "properties": {
+                        "qualified_name": "resource::DATABASE::users", "kind": "DATABASE",
+                    }},
+                ],
+                "relationships": [{"from_id": 1, "to_id": 2, "type": "READS_FROM", "properties": {}}],
+            }), encoding="utf-8")
+            claims.write_text(json.dumps({
+                "answer": "login reads users",
+                "citations": [
+                    {"node_id": 1, "qualified_name": "app.auth.login"},
+                    {"from_node_id": 1, "to_node_id": 2, "type": "READS_FROM"},
+                    {"node_id": 999, "qualified_name": "hallucinated.node"},
+                ],
+            }), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / "code_graph_grounding.py"), "verify",
+                 "--graph", str(graph), "--claims", str(claims)],
+                text=True, capture_output=True, timeout=30, check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertFalse(payload["grounded"])
+            self.assertIn("node_id 999", " ".join(payload["errors"]))
+
+    def test_code_graph_grounding_accepts_valid_citations_and_source_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "app.py"
+            source.write_text("def login():\n    return True\n", encoding="utf-8")
+            graph = root / "graph.json"
+            claims = root / "claims.json"
+            graph.write_text(json.dumps({
+                "metadata": {"project": "fixture"},
+                "nodes": [
+                    {"node_id": 1, "labels": ["Function"], "properties": {
+                        "qualified_name": "app.login", "path": "app.py",
+                        "start_line": 1, "end_line": 2,
+                    }},
+                ],
+                "relationships": [],
+            }), encoding="utf-8")
+            claims.write_text(json.dumps({
+                "answer": "login is defined in app.py",
+                "citations": [{
+                    "node_id": 1, "qualified_name": "app.login", "path": "app.py",
+                    "start_line": 1, "end_line": 2,
+                }],
+            }), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / "code_graph_grounding.py"), "verify",
+                 "--graph", str(graph), "--claims", str(claims), "--repo", str(root)],
+                text=True, capture_output=True, timeout=30, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["grounded"])
+            self.assertEqual(payload["status"], "SUPPORTED")
+            self.assertRegex(payload["validated_citations"][0]["source_sha256"], r"^[0-9a-f]{64}$")
 
 
 class ScopeTests(unittest.TestCase):
@@ -227,6 +440,105 @@ class EngagementCliTests(unittest.TestCase):
                 text=True, capture_output=True, timeout=30, check=False,
             )
             self.assertEqual(gate.returncode, 0, gate.stdout + gate.stderr)
+
+    def test_new_engagement_files_are_owner_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            create = subprocess.run(
+                [
+                    sys.executable, str(SCRIPTS / "new_engagement.py"), str(root),
+                    "--title", "Private test", "--target", "example.com",
+                ],
+                text=True, capture_output=True, timeout=30, check=False,
+            )
+            self.assertEqual(create.returncode, 0, create.stderr)
+            files = [path for path in root.rglob("*") if path.is_file()]
+            self.assertTrue(files)
+            for path in files:
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600, path)
+
+    def test_p3_rejects_unknown_playbook_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            create = subprocess.run(
+                [
+                    sys.executable, str(SCRIPTS / "new_engagement.py"), str(root),
+                    "--title", "P3 test", "--target", "example.com",
+                ],
+                text=True, capture_output=True, timeout=30, check=False,
+            )
+            self.assertEqual(create.returncode, 0, create.stderr)
+            state = json.loads((root / "state.json").read_text(encoding="utf-8"))
+            state["playbooks_loaded"] = True
+            (root / "state.json").write_text(json.dumps(state), encoding="utf-8")
+            rows = {
+                "asset-inventory.csv": {"asset_id": "AST-001", "asset": "example.com", "type": "web", "environment": "prod", "owner": "owner", "scope_status": "in_scope", "source": "manual", "notes": ""},
+                "surface-inventory.csv": {"surface_id": "SUR-001", "asset_id": "AST-001", "surface": "web", "protocol": "https", "auth_requirement": "none", "state_change_risk": "low", "third_party": "no", "scope_status": "in_scope", "source": "manual", "confidence": "high", "coverage_status": "planned", "notes": ""},
+                "hypothesis-ledger.csv": {"hypothesis_id": "HYP-001", "asset_id": "AST-001", "surface_id": "SUR-001", "actor": "external", "invariant": "authz holds", "mutation": "probe", "safe_validation": "manual", "priority": "P2", "status": "pending", "notes": ""},
+                "test-matrix.csv": {"test_id": "TST-001", "hypothesis_id": "HYP-001", "asset_id": "AST-001", "surface_id": "SUR-001", "baseline": "baseline", "mutation": "mutation", "expected_result": "deny", "negative_control": "control", "evidence_plan": "none", "cleanup": "none", "risk": "low", "permission_mode": "ACTIVE_SAFE", "status": "planned", "evidence_ids": "", "notes": "playbook: does-not-exist"},
+            }
+            for filename, row in rows.items():
+                with (root / filename).open("w", encoding="utf-8", newline="") as handle:
+                    writer = csv.DictWriter(handle, fieldnames=LEDGER_SCHEMAS[filename])
+                    writer.writeheader()
+                    writer.writerow(row)
+            gate = subprocess.run(
+                [sys.executable, str(SCRIPTS / "gate_check.py"), str(root), "--phase", "P3", "--json"],
+                text=True, capture_output=True, timeout=30, check=False,
+            )
+            self.assertNotEqual(gate.returncode, 0)
+            self.assertIn("does-not-exist", gate.stdout)
+
+    def test_make_deliverables_help_and_apostrophe_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement's"
+            root.mkdir()
+            (root / "engagement.json").write_text(
+                json.dumps({"title": "Title survives apostrophe path"}), encoding="utf-8"
+            )
+            fakebin = Path(temp) / "bin"
+            fakebin.mkdir()
+            log = Path(temp) / "officecli.log"
+            officecli = fakebin / "officecli"
+            officecli.write_text(
+                "#!/usr/bin/env bash\n"
+                f"printf '%s\\n' \"$*\" >> {str(log)!r}\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            officecli.chmod(0o700)
+            env = {**os.environ, "PATH": str(fakebin) + os.pathsep + os.environ.get("PATH", "")}
+            help_run = subprocess.run(
+                ["bash", str(SCRIPTS / "make_deliverables.sh"), "--help"],
+                text=True, capture_output=True, timeout=30, check=False,
+            )
+            self.assertEqual(help_run.returncode, 0, help_run.stderr)
+            run = subprocess.run(
+                ["bash", str(SCRIPTS / "make_deliverables.sh"), str(root)],
+                text=True, capture_output=True, timeout=30, check=False, env=env,
+            )
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            self.assertIn("Title survives apostrophe path", log.read_text(encoding="utf-8"))
+
+    def test_evidence_capture_rejects_path_traversal(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "engagement"
+            root.mkdir()
+            (root / "evidence-ledger.csv").write_text(
+                "evidence_id,captured_at_utc,hypothesis_id,test_id,finding_id,asset_id,path,sha256,sensitivity,redaction_status,observation,cleanup_status\n",
+                encoding="utf-8",
+            )
+            outside = root / "escape.txt"
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPTS / "evidence_capture.py"), str(root),
+                    "--evidence-id", "EV-001", "--asset", "AST-001",
+                    "--observation", "test", "--stdin", "../../escape.txt",
+                ],
+                input="secret\n", text=True, capture_output=True, timeout=30, check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(outside.exists())
 
 
 class EvidenceCaptureTests(unittest.TestCase):
