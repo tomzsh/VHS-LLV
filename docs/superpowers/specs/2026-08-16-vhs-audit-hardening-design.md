@@ -117,7 +117,10 @@ the current engagement through `authorize_run()` and reject a base URL or any
 resolved endpoint whose host is outside the engagement scope. Endpoint joining
 will use URL parsing rather than unchecked string concatenation.
 
-GET remains the default. Non-GET methods require an explicit
+GET remains the default for target endpoint requests. Direct token use skips
+the login request; email/password login is treated as an authentication bootstrap
+and requires an engagement `allowed_methods` entry of `login` or
+`authentication`. Other non-GET methods require an explicit
 `--allow-state-change` flag and an engagement `allowed_methods` entry matching
 the requested method/action class. Network and timeout errors will be rendered
 as controlled observations instead of terminating the helper with an unhandled
@@ -131,6 +134,7 @@ Markdown headings and emit selected heading sections. It will support:
 - outline-only output;
 - case-insensitive heading-term selection;
 - extraction through the next heading of equal or higher level;
+- ignoring ATX-looking lines inside fenced code blocks;
 - a `--full` escape hatch for exact full-reference review;
 - safe fallback to the complete file when no requested section matches.
 
@@ -139,8 +143,9 @@ the router is the single loading policy:
 
 - load the compact contract and current phase guidance once;
 - use the attack-playbook index to select classes;
-- use section slices for P3 planning (`entry`, `probe`, `evidence`, and
-  compliance/stop sections);
+- use section slices for P3 planning (bilingual terms covering entry, probe,
+  bypass, evidence, and compliance/stop sections, including the imported
+  headings `高频入口`, `探测手法`, `复现`, `证据`, and `不要做`);
 - load the full selected playbook for P4 exact validation or when a slice does
   not contain the required procedure;
 - do not load unrelated playbooks, duplicate routing tables, or full catalogs.
