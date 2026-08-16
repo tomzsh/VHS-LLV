@@ -60,6 +60,21 @@ def sha256_of(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def safe_filename(value: str) -> str:
+    """Allow only a plain filename for stdin evidence output."""
+    candidate = Path(value)
+    if (
+        not value
+        or candidate.is_absolute()
+        or candidate.name != value
+        or value in {".", ".."}
+        or "/" in value
+        or "\\" in value
+    ):
+        raise ValueError("--stdin must be a plain filename, not a path")
+    return value
+
+
 def safe_artifact_name(evidence_id: str, source_name: str) -> str:
     if not EVIDENCE_ID_RE.fullmatch(evidence_id):
         raise ValueError("--evidence-id must be a single safe identifier")
@@ -184,6 +199,14 @@ def main() -> int:
         print("[!] provide exactly one of --file or --stdin", file=sys.stderr)
         return 1
 
+    stdin_name = ""
+    if args.stdin:
+        try:
+            stdin_name = safe_filename(args.stdin)
+        except ValueError as exc:
+            print(f"[!] {exc}", file=sys.stderr)
+            return 2
+
     if args.file:
         src = Path(args.file).expanduser().resolve()
         if not src.is_file():
@@ -192,7 +215,7 @@ def main() -> int:
         source_name = src.name
     else:
         src = None
-        source_name = args.stdin
+        source_name = stdin_name
 
     try:
         name = safe_artifact_name(args.evidence_id, source_name)

@@ -1,5 +1,82 @@
 # Changelog
 
+## 2.6.0 — cited 2026 Web2 vulnerability references
+
+- Added `references/web2-2026-references.md` covering ATO, IDOR/BOLA,
+  business logic, SQLi, NoSQLi, SSTI, command injection, CSRF,
+  deserialization, race/TOCTOU, privilege escalation, fail-open,
+  authorization, canonicalization, and configuration/exception handling.
+- Added a 2026 CVE anchor matrix using canonical CVE Services records, plus
+  OWASP 2025, CWE, and PortSwigger methodology sources.
+- Explicitly separates IDOR evidence (CWE-639/object ownership proof) from
+  adjacent 2026 authorization-bypass and privilege-transition cases.
+- Routed the reference through `context-router.md` and `references/index.md` so
+  only the matching subsection is loaded; core token footprint is unchanged.
+- Bumped the local skill version from 2.5.0 to 2.6.0; no GitHub commit/push.
+
+## 2.5.0 — lazy context routing and token-footprint reduction
+
+- Added `references/context-router.md` with phase/surface routing, fallback
+  rules, and a no-unrelated-playbooks loading invariant.
+- Moved account/OTP, research, operator commands, tool quirks/catalog, and
+  crawler extras into conditional references instead of the core `SKILL.md`.
+- Reduced duplicate GraphQL and Code Graph prose in `SKILL.md` to routing
+  pointers while preserving their full integration references and commands.
+- Kept authorization, P0-P6 gates, evidence, state/resume, scope, and
+  verification rules in the core prompt so capability is not reduced.
+- Bumped the local skill version from 2.4.0 to 2.5.0; no GitHub commit/push.
+
+## 2.4.0 — Code Graph SAST and grounded RAG integration
+
+- Added local Code-Graph-RAG integration as the static-analysis counterpart to
+  GraphQL Cop DAST: Tree-sitter code graphs and typed nodes/edges are kept
+  behind `scripts/code_graph_rag.sh`; optional embedding search is documented
+  separately because it pulls a large ML runtime.
+- Added `scripts/code_graph_grounding.py` with deterministic `context` and
+  `verify` commands. Node/edge citations must exist in the graph export;
+  unsupported or fabricated citations return `UNKNOWN` and a non-zero exit.
+- Added the `sast` tool agent and Code-Graph-RAG readiness probe to
+  `check_tools.py`, with `VHS_CODE_GRAPH_RAG_BIN` override support.
+- Added `references/code-graph-rag-integration.md`, covering SAST workflow,
+  RAG retrieval contract, provenance, source/line checks, prompt-injection
+  boundaries, and evidence handling.
+- Added regression tests for launcher forwarding, tool detection, and rejection
+  of hallucinated graph nodes/edges.
+
+## 2.3.0 — local GraphQL Cop integration
+
+- Installed GraphQL Cop `1.15` locally at `~/tools/graphql-cop` in an isolated
+  virtual environment; no global Python package or GitHub push was used.
+- Added `scripts/graphql_cop.sh`, with `VHS_GRAPHQL_COP_HOME` override and
+  `PYTHONPATH` isolation.
+- Added GraphQL-specific readiness detection to `check_tools.py` and the
+  `graphql` tool agent in `config/tools.json`.
+- Added `references/graphql-integration.md` and connected the GraphQL playbook
+  to the local launcher. GraphQL Cop remains explicit/manual rather than an
+  automatic orchestrator stage because its checks generate active requests.
+- Added regression tests for launcher argument forwarding and isolated tool
+  detection.
+
+## 2.2.2 — engagement and gate hardening
+
+Fixed four reproducible defects found during the script audit:
+
+- `new_engagement.py` and `schemas.py` now create engagement documents and
+  ledgers with owner-only mode `0600`; confidential scope, RoE, evidence
+  metadata, and findings notes no longer inherit a world-readable `0644` mode
+  under a typical `umask 022`.
+- `evidence_capture.py --stdin` now accepts only a plain filename. Absolute and
+  traversal paths such as `../../escape.txt` are rejected before capture, so a
+  capture cannot write outside `evidence/raw/`.
+- P3 gate playbook citations are now checked against the installed
+  `references/attack-playbooks/` directory. A typo or nonexistent playbook no
+  longer satisfies the grounding requirement.
+- `make_deliverables.sh` now supports `--help` and reads `engagement.json` via
+  an argv path instead of interpolating the path into Python source; engagement
+  directories containing apostrophes or other shell-significant characters now
+  preserve the report title.
+- Added four regression tests; offline suite is now 22/22.
+
 ## 2.2.1 — kill_chain.py no longer writes into the skill folder
 
 Fixed a cleanup bug: `kill_chain.py` defaulted `CHAIN_DIR` to

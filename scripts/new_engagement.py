@@ -19,8 +19,16 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def write_private_text(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
 def write_json(path: Path, value: object) -> None:
-    path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    write_private_text(path, json.dumps(value, indent=2) + "\n")
 
 
 
@@ -81,8 +89,8 @@ def main() -> int:
     # PII, credentials). If this engagement dir ever lives inside a git repo,
     # it must never be committed. Belt-and-suspenders: ignore it at both the
     # engagement root and inside the folder itself.
-    (root / ".gitignore").write_text("evidence/raw/\n", encoding="utf-8")
-    (root / "evidence" / "raw" / ".gitignore").write_text("*\n!.gitignore\n", encoding="utf-8")
+    write_private_text(root / ".gitignore", "evidence/raw/\n")
+    write_private_text(root / "evidence" / "raw" / ".gitignore", "*\n!.gitignore\n")
 
     engagement_id = f"{safe_slug(args.title)}-{datetime.now(timezone.utc):%Y%m%d}"
     engagement = {
@@ -141,7 +149,7 @@ def main() -> int:
 
     create_missing_ledgers(root)
 
-    (root / "threat-model.md").write_text(
+    write_private_text(root / "threat-model.md",
         "# Threat Model\n\n"
         "## Architecture and data flows\n\n"
         "<Document the authorized system.>\n\n"
@@ -154,20 +162,18 @@ def main() -> int:
         "## Security invariants\n\n"
         "<Write falsifiable invariant statements.>\n\n"
         "## Limitations\n\n"
-        "<Document unavailable roles, excluded systems, and prohibited actions.>\n",
-        encoding="utf-8",
+        "<Document unavailable roles, excluded systems, and prohibited actions.>\n"
     )
-    (root / "session-log.md").write_text(
+    write_private_text(root / "session-log.md",
         f"# Session Log\n\n"
         f"## {utc_now()} — Workspace initialized\n\n"
         f"- Engagement: {args.title}\n"
         f"- Primary target: {args.target}\n"
         "- Phase: P0\n"
         f"- Permission mode: {args.permission_mode}\n"
-        "- Action: Created assessment ledgers; no target interaction performed.\n",
-        encoding="utf-8",
+        "- Action: Created assessment ledgers; no target interaction performed.\n"
     )
-    (root / "report-draft.md").write_text(
+    write_private_text(root / "report-draft.md",
         f"# Security Assessment — {args.target}\n\n"
         "Status: Draft; not cleared for disclosure.\n\n"
         "## Executive Summary\n\n<Complete after triage.>\n\n"
@@ -175,11 +181,10 @@ def main() -> int:
         "## Methodology and Coverage\n\n<Complete from P0–P6 ledgers.>\n\n"
         "## Findings Summary\n\n<Complete from findings-index.csv.>\n\n"
         "## Findings\n\n<Insert evidence-backed findings.>\n\n"
-        "## Limitations\n\n<Complete from the threat model and blocked tests.>\n",
-        encoding="utf-8",
+        "## Limitations\n\n<Complete from the threat model and blocked tests.>\n"
     )
 
-    (root / "README.md").write_text(
+    write_private_text(root / "README.md",
         "# Engagement workspace\n\n"
         "| File | Purpose | Phase |\n"
         "|---|---|---|\n"
@@ -197,8 +202,7 @@ def main() -> int:
         "| `session-log.md` | Chronological method/timing/stop-event log | all |\n"
         "| `report-draft.md` → `final-report.md` | The deliverable | P6 |\n\n"
         "Run `python3 scripts/gate_check.py <this-dir> --phase P0` after filling in `engagement.json` "
-        "before doing anything beyond passive/plan-only work.\n",
-        encoding="utf-8",
+        "before doing anything beyond passive/plan-only work.\n"
     )
 
     print(f"Created engagement workspace: {root}")

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,11 @@ from schemas import LEDGER_SCHEMAS, create_missing_ledgers, validate_ledger_head
 PHASES = ["P0", "P1", "P2", "P3", "P4", "P5", "P6"]
 PLACEHOLDERS = {"", "TO_BE_CONFIRMED", "<todo>", "todo", "unknown"}
 FINAL_TEST_STATES = {"confirmed", "rejected", "blocked", "inconclusive", "not_applicable"}
+PLAYBOOK_CITATION_RE = re.compile(
+    r"(?:attack[-_ ]?playbooks?/|(?:playbook|pb)\s*[:=]\s*)"
+    r"([A-Za-z0-9][A-Za-z0-9_-]*)(?:\.md)?",
+    re.IGNORECASE,
+)
 
 CSV_TEMPLATES = LEDGER_SCHEMAS
 
@@ -141,6 +147,12 @@ def p3(root: Path, errors: list[str]) -> None:
     hypothesis_ids = {row.get("hypothesis_id", "") for row in hypotheses}
     asset_ids = {row.get("asset_id", "") for row in assets}
     surface_ids = {row.get("surface_id", "") for row in surfaces}
+    state = read_json(root / "state.json")
+    if state.get("playbooks_loaded") is not True:
+        errors.append(
+            "playbooks not loaded: run gate_check.py --phase P3 --mark-playbooks after reading references/attack-playbooks/00-index.md"
+        )
+    playbook_dir = Path(__file__).resolve().parents[1] / "references" / "attack-playbooks"
     if not tests:
         errors.append("test-matrix.csv needs at least one planned test")
     covered_surfaces = {row.get("surface_id", "") for row in tests}
@@ -156,6 +168,18 @@ def p3(root: Path, errors: list[str]) -> None:
                 f"in-scope surface {row.get('surface_id') or '<missing>'} lacks a test or justified coverage status"
             )
     for index, row in enumerate(tests, 2):
+        notes = row.get("notes", "")
+        citation = PLAYBOOK_CITATION_RE.search(notes)
+        if not citation:
+            errors.append(
+                f"test-matrix.csv line {index} ({row.get('test_id') or '?'}): notes must cite a playbook "
+                f"(e.g. notes='playbook: sqli' or 'attack-playbooks/sqli.md') — see references/attack-playbooks/00-index.md"
+            )
+        elif not (playbook_dir / f"{citation.group(1).lower()}.md").is_file():
+            errors.append(
+                f"test-matrix.csv line {index} ({row.get('test_id') or '?'}): "
+                f"playbook '{citation.group(1)}' does not exist under references/attack-playbooks/"
+            )
         for field in (
             "test_id",
             "hypothesis_id",
@@ -253,11 +277,24 @@ def main() -> int:
     parser.add_argument("--advance", action="store_true", help="Advance state after a passing gate")
     parser.add_argument("--init", action="store_true", help="Create missing ledger CSVs with correct headers")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON instead of text")
+    parser.add_argument(
+        "--mark-playbooks",
+        action="store_true",
+        help="Mark state.json playbooks_loaded=true after reading references/attack-playbooks/00-index.md (required before P3 advance)",
+    )
     args = parser.parse_args()
 
     root = Path(args.directory).expanduser().resolve()
-    if not args.init and not args.phase:
-        parser.error("--phase is required unless --init is used")
+    if not args.init and not args.phase and not args.mark_playbooks:
+        parser.error("--phase is required unless --init or --mark-playbooks is used")
+    if args.mark_playbooks:
+        state = read_json(root / "state.json")
+        state["playbooks_loaded"] = True
+        state["updated_at"] = utc_now()
+        (root / "state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+        msg = "Playbooks marked as loaded. P3 advance will now accept playbook-grounded tests."
+        print(json.dumps({"phase": args.phase, "pass": True, "playbooks_loaded": True}) if args.json else msg)
+        return 0
     if args.init:
         created = init_ledgers(root)
         msg = f"INIT: created {len(created)} ledger(s): {', '.join(created)}" if created else "INIT: all ledgers already exist"

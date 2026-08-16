@@ -28,6 +28,10 @@ def create_missing_ledgers(root: Path) -> list[str]:
             continue
         with path.open("w", encoding="utf-8", newline="") as handle:
             csv.writer(handle).writerow(headers)
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
         created.append(name)
     return created
 

@@ -1,7 +1,7 @@
 ---
 name: vhs
-description: Authorized pentest/bug-bounty/code-audit, P0-P6 gates.
-version: 2.2.1
+description: "WEB2/GraphQL pentest and bug-bounty code-audit, P0-P6 gates. Primary web2 entry-point skill — IDOR/object-level access, GraphQL auth/schema testing, file access, export/auth-bypass, injection-to-RCE, SSRF, business-logic & race/dedup flaws, authorized web/app/API/mobile testing."
+version: 2.6.0
 author: tomzsh
 platforms: [linux]
 metadata:
@@ -46,28 +46,10 @@ credential theft, service disruption, or evasion of program controls.
 
 ## Account registration & OTP capture (AgentMail)
 
-When an engagement needs an email to register a test account (signup OTP /
-verification link), use the **AgentMail** integration — NOT real human email.
-
-**Resource guard — USE SPARINGLY.** Free tier = 3 inboxes / **3,000 emails per
-month** across the whole org. Treat it as a budget, not a pool:
-
-- Create **one inbox per target** (`agentmail alias add <target> <inbox_id>`),
-  never per attempt. Reuse it across the engagement.
-- Poll with `agentmail watch <alias> --interval 5 --output <run>/otp.jsonl`
-  (continuous) or one-shot `agentmail otp <alias> --from <sender>`; every poll
-  is a GET but every **send** counts against the monthly cap.
-- Only send email when the target's flow actually requires it; prefer passing
-  the inbox address to the target's signup so the target sends the OTP (that's
-  inbound, does not burn your outbound quota).
-- `agentmail delete <inbox>` when the engagement ends to free inbox slots.
-- Wrap email creation behind an explicit engagement need — do not auto-provision
-  inboxes during P2 recon. Ask the operator first; scope/authorization for the
-  account only widen explicit RoE.
-
-Full CLI, OTP-extraction rules, watch/exec triggers, and pitfalls live in the
-**`agentmail`** skill (`skills/email/agentmail`). Every OTP read lands in the
-engagement's evidence ledger under `evidence/`.
+Load `references/account-otp.md` only when a test account signup or OTP flow is
+in scope. It contains the quota guard, exact AgentMail commands, evidence rules,
+and pointer to the full `agentmail` skill. Never put OTPs or engagement account
+facts in global memory or the VHS skill tree.
 
 ## Per-target memory isolation (mandatory)
 
@@ -100,17 +82,19 @@ python3 <skill-dir>/scripts/rollup_memory.py ./engagement --json
 
 ## Startup procedure
 
-Resolve all paths relative to this `SKILL.md`, then read:
+Resolve paths relative to this `SKILL.md`, then read:
 
-- `references/operating-contract.md`;
-- `references/non-qualifying.md`;
-- `references/index.md`;
-- `references/taxonomy-rating.md` (from P1 onward; mandatory at P5 for severity);
-- the reference file for the current P0-P6 phase;
-- the relevant target module.
+1. `references/context-router.md` first — it is the lazy-loading policy.
+2. `references/operating-contract.md`, `references/index.md`, and the current
+   phase reference.
+3. `references/non-qualifying.md` before classifying findings and
+   `references/evidence-standard.md` before evidence review.
+4. Only the target module, attack playbook, tool catalog, or specialized
+   reference selected by the router. Do not load unrelated phases/playbooks.
 
 Load the engagement state from disk. Do not infer the current phase from chat
-history alone.
+history alone. If a selected reference is missing, stop and report its exact
+path instead of improvising it.
 
 ## Create an engagement
 
@@ -245,10 +229,16 @@ It cannot authorize an asset absent from `engagement.json`.
 |---|---|---|---|
 | P0 | authorization and safety | `p0-authorization.md` | `engagement.json` |
 | P1 | model actors, boundaries, invariants | `p1-modeling.md`, `taxonomy-rating.md` | threat model and hypotheses |
-| P1-research | pull disclosed hacktivity/writeups for the target stack | `research_hacktivity.py` (see Research stage below) | `research/` digest + ledger |
+| P1-research | pull disclosed hacktivity/writeups for the target stack | `research-stage.md` | `research/` digest + ledger |
 | P2 | map authorized surfaces | `p2-recon.md`, `taxonomy-rating.md` | asset and surface inventories |
 | P2-mobile | static-analyze an in-scope Android app | `module-android-apk.md` (via `apk_recon.sh`) | decompile + exported/secret/endpoint report |
-| P3 | design controlled tests | `p3-test-design.md` | test matrix |
+| P3 | design controlled tests | `p3-test-design.md`, `attack-playbooks/00-index.md` | test matrix |
+
+P3 gate now **enforces playbook grounding**: `gate_check.py --phase P3` fails until
+`--mark-playbooks` has set `state.json playbooks_loaded=true` (run it after reading
+`attack-playbooks/00-index.md`), and every `test-matrix.csv` row must cite a playbook in
+its `notes` column (e.g. `notes='playbook: sqli'` or `attack-playbooks/<name>.md`).
+
 | P4 | validate with controls | `p4-validation.md` | evidence ledger |
 | P5 | root cause and severity | `p5-triage.md`, `taxonomy-rating.md`, `bountyforge-judging.md`, `bountyforge-cvss.md` | findings index |
 
@@ -262,77 +252,30 @@ python3 <skill-dir>/scripts/kill_chain_vhs.py ./engagement \
 BountyForge `kill_chain.py`.)
 | P6 | report, disclose, retest | `p6-report-retest.md` | final report |
 
+## GraphQL and Code Graph routing
+
+- GraphQL endpoint/schema/tool → load `references/graphql-integration.md` and the
+  selected GraphQL playbook. GraphQL Cop is explicit/manual DAST only; never
+  run it against an unfiltered crawler candidate.
+- Local source/SAST/code graph → load `references/code-graph-rag-integration.md`
+  and the relevant source-analysis module. Code-Graph-RAG is read-only from VHS's
+  perspective; deterministic node/edge grounding is required before a claim
+  enters the findings workflow.
+
+These references contain the commands, evidence contracts, tool readiness checks,
+and limitations. Do not duplicate their full procedures in the active context.
+
 ## Research stage (P1/P2 optional)
 
-Before drafting hypotheses, pull disclosed hacktivity/writeups relevant to the
-target's stack — hunt classes track what actually gets rewarded:
-
-```bash
-python3 <skill-dir>/scripts/research_hacktivity.py ./engagement \
-    --sources hackerone,pentesterland,portswigger,research_blogs \
-    --months 6 \
-    --query "wallet card api idor access control jwt" \
-    --min-severity high --limit 15
-```
-
-Writes `research/hacktivity-results.md` + `research/research-ledger.jsonl`
-under the engagement dir. Sources: `hackerone` (GraphQL, no auth),
-`pentesterland`, `medium`, `infosecwriteups`, `portswigger`, `intigriti`,
-`research_blogs`, `google` (needs `GOOGLE_API_KEY`/`GOOGLE_CSE_ID`), `all`.
-Powered by `research_sources.py` (ported from
-github.com/The-XSS-Rat/BountySkiller, attributed). Output is secondary intel
-— a hypothesis input, never a finding.
-
-Advance only after automated checks and human review:
-
-```bash
-python3 <skill-dir>/scripts/gate_check.py ./engagement --phase Pn
-python3 <skill-dir>/scripts/gate_check.py ./engagement --phase Pn --advance
-```
+Load `references/research-stage.md` only when disclosed hacktivity or writeup
+research is explicitly needed. Research output is secondary hypothesis input,
+never a confirmed finding.
 
 ## Operator quick commands
 
-Fast setup and review helpers (all read-only unless noted):
-
-```bash
-# engagement status: phase + gate history + ledger counts
-python3 <skill-dir>/scripts/status.py ./engagement
-
-# import a HackerOne/Bugcrowd scope CSV export into asset-inventory.csv
-python3 <skill-dir>/scripts/import_scope.py ./engagement --scope program-scope.csv --dry-run
-python3 <skill-dir>/scripts/import_scope.py ./engagement --scope program-scope.csv
-# NOTE: refuses to clobber a non-empty asset-inventory.csv (manual assets or a
-# prior import). Re-import with --force to replace it, or merge manually.
-
-# per-surface P1/P2 hunting checklist (taxonomy-derived; advisory)
-python3 <skill-dir>/scripts/surface_checklist.py ./engagement --out checklist.md
-
-# Android APK static recon (P2 mobile): decompile + exported/secret/endpoint report
-bash <skill-dir>/scripts/apk_recon.sh /path/to/target.apk -o ./engagement/apk-recon
-# large/obfuscated APK: add deobfuscation
-VHS_JADX_ARGS=--deobf bash <skill-dir>/scripts/apk_recon.sh /path/to/target.apk -o ./engagement/apk-recon
-
-# P1/P2 research: disclosed hacktivity/writeups -> research/ (hypothesis input)
-python3 <skill-dir>/scripts/research_hacktivity.py ./engagement \
-    --sources hackerone,portswigger,research_blogs --months 6 \
-    --query "wallet card api idor jwt" --min-severity high --limit 15
-
-# per-target memory rollup (run after P2/P4/P5 updates; resume source of truth)
-python3 <skill-dir>/scripts/rollup_memory.py ./engagement --write
-
-# authenticated read-only API probe (creds from env only)
-export API_AUTH_EMAIL=... API_AUTH_PASS=...
-python3 <skill-dir>/scripts/api_auth_probe.py https://api-uat.target.com \
-    --endpoints /init,/account/info --swap-param user_id --swap-id 999
-
-# one-shot evidence capture -> evidence/raw + redacted + ledger row
-python3 <skill-dir>/scripts/evidence_capture.py ./engagement \
-    --evidence-id EV-004 --asset AST-004 --test TST-002 \
-    --observation "cross-account response" --file response.json
-
-# P6 deliverables (.docx + .xlsx) from ledgers via officecli
-bash <skill-dir>/scripts/make_deliverables.sh ./engagement
-```
+Load `references/operator-commands.md` only when an exact helper command is
+needed. It contains status, scope import, APK, Code Graph, research, evidence,
+rollup, and deliverable commands without adding them to every task's context.
 
 ## Checkpoint discipline
 
@@ -385,90 +328,20 @@ python3 <skill-dir>/scripts/triage_scan.py ./engagement \
 ```bash
 python3 <skill-dir>/scripts/check_tools.py --profile scanner-safe --verify
 python3 -m py_compile <skill-dir>/scripts/*.py
-bash -n <skill-dir>/scripts/vulnhunter-tools.sh
-python3 <skill-dir>/scripts/research_hacktivity.py --help   # P1/P2 research stage
-python3 <skill-dir>/scripts/rollup_memory.py ./engagement --json > /dev/null  # per-target memory
-python3 <skill-dir>/scripts/kill_chain_vhs.py ./engagement --dry-run > /dev/null 2>&1 || true  # P5 chaining
+for f in <skill-dir>/scripts/*.sh; do bash -n "$f" || exit 1; done
 python3 -m unittest discover -s <skill-dir>/tests -v
 ```
 
-## Helper guards & quirks (quick reference)
+For specialized smoke commands, load `references/tool-catalog.md` and the
+matching integration reference rather than expanding the core procedure.
 
-Non-obvious behaviors that bite on resume or reuse. Full detail in each script.
+## Helper guards, bundled scripts, and crawler extras
 
-| Helper | Guard / quirk |
-|---|---|
-| `import_scope.py` | Refuses to overwrite a **non-empty** `asset-inventory.csv`; pass `--force` to replace, or merge manually. `--dry-run` previews without writing. |
-| `evidence_capture.py` | `--evidence-id` must be **unique** — a duplicate is rejected *before* any file is written (no orphan raw file, no silent ledger overwrite). Raw+redacted files are chmod `0600`. |
-| `kill_chain_vhs.py` | Only chains findings with status `open/confirmed/triaged/validated`; `bug_class`/`endpoint`/`method` are inferred from each finding's title/root_cause/impact text. Chain severity is always ≥ the strongest matched finding. Reads `findings-index.csv`, writes `kill-chains.md`. The port's own `save_chains()` cache defaults to `$TMPDIR/vhs-kill-chains` (override `VHS_CHAIN_DIR`) — never inside the skill folder. |
-| `vulnhunter_orchestrator.py` | `--engagement ./engagement` auto-resolves a doubled path (works from inside the engagement dir). `--resume` requires the **same** `--out` and a matching config fingerprint, else it aborts. Holds an exclusive `flock` on the run dir — one run at a time. |
-| `triage_scan.py` | Reads output paths from `manifest.json` (v2 `outputs` map); a v1 manifest warns and finds nothing. Never marks a match confirmed. |
-| `apk_recon.sh` | Read-only static analysis (never installs/runs the APK). jadx exiting non-zero is normal for obfuscated apps — it still yields a partial decompile; check `report/jadx.log`. Secret candidates are **candidates**: a public client id (OneSignal/FCM app-id, Firebase web config) is not a finding — verify the key against an in-scope endpoint first. |
-| `gate_check.py` / `state.json` | Never hand-edit `current_phase` to skip a gate; advance only with `--advance` after checks + human review. |
-| `rollup_memory.py` | Per-target memory source of truth on resume — reload from `--write` output, never from chat/global memory. Run after every P2/P4/P5 change. |
-| `api_auth_probe.py` | Credentials from **env only** (`API_AUTH_EMAIL`/`API_AUTH_PASS`/`API_AUTH_TOKEN`); read-only GET unless `--method` is explicitly given for a separately authorized action. |
-| venv launchers (`scrapling`/`crawl4ai`/`sqlmap`/`wafw00f`/`paramspider`/`nikto`) | Each clears `PYTHONPATH` (PEP 668-safe) and runs under its own venv; override homes with the matching `VHS_*_HOME` / `VHS_*_PYTHON` env var. |
-
-## Bundled scripts
-
-- `new_engagement.py` — secure workspace initialization.
-- `gate_check.py` — shared-schema P0-P6 gate validation.
-- `policy.py` — authorization, testing-window, and scope enforcement.
-- `vulnhunter_orchestrator.py` — profile-aware resumable DAG. `--engagement`
-  auto-resolves a doubled relative path (running from inside the engagement dir
-  with `--engagement ./engagement` now works).
-- `triage_scan.py` — manifest-aware, scope-checked scanner triage.
-- `redact_scan.py` — sensitive-value review helper.
-- `check_tools.py` — profile-aware dependency inspection.
-- `scrapling_crawl.py` + `scrapling_crawl.sh` — stealth fetch + link extraction
-  (handles 403/Cloudflare pages). Launcher clears `PYTHONPATH` and runs under the
-  scrapling venv (`~/tools/scrapling/venv`); override with
-  `VHS_SCRAPLING_HOME` / `VHS_SCRAPLING_PYTHON`.
-- `wafw00f.sh` — WAF fingerprinting via the wafw00f venv
-  (`~/tools/wafw00f`); override with `VHS_WAFW00F_HOME`. Detects the
-  WAF before choosing bypass/rate-limit strategies.
-- `sqlmap.sh` / `paramspider.sh` / `nikto.sh` — venv/source launchers for SQLi
-  automation, parameter discovery, and server misconfig scanning. Homes:
-  `~/tools/<sqlmap|paramspider|nikto>`; override with
-  `VHS_SQLMAP_HOME` / `VHS_PARAMSPIDER_HOME` / `VHS_NIKTO_HOME`. All clear
-  `PYTHONPATH` (PEP 668-safe pattern).
-- `crawl4ai_crawl.py` + `crawl4ai_crawl.sh` — headless-Chromium JS crawl via crawl4ai.
-- `apk_recon.sh` — one-shot Android APK static recon (P2 mobile surface):
-  decompiles with jadx (Java sources) + apktool (manifest/resources), then
-  extracts exported components, deep links, hard-coded secret candidates, and
-  API endpoints into a `report/` folder. Read-only static analysis — never
-  installs or runs the app. Override binaries with `VHS_JADX` / `VHS_APKTOOL`,
-  extra jadx flags with `VHS_JADX_ARGS` (e.g. `--deobf`). See
-  `references/module-android-apk.md` for the full manifest/secret/adb-PoC playbook.
-- `import_scope.py` — import a program scope CSV (H1/BC export) into
-  `asset-inventory.csv` with env/type normalization and dry-run preview.
-- `research_hacktivity.py` — P1/P2 research stage: pull disclosed hacktivity /
-  bug-bounty writeups (HackerOne GraphQL, Pentester.land, PortSwigger, Medium,
-  blogs) filtered by relevance/severeity/bounty, into `research/`. Backed by
-  `research_sources.py` (ported from The-XSS-Rat/BountySkiller).
-- `rollup_memory.py` — per-target isolated memory: compact engagement.json +
-  all ledgers into `memory-rollup.md` (or `--json`). Resume source of truth;
-  keeps engagement facts out of global memory/mem0.
-- `kill_chain.py` + `kill_chain_vhs.py` — P5 composite attack chains from
-  `findings-index.csv` (ported from BountyForge; A→B→C = combined severity).
-- `api_auth_probe.py` — authenticated read-only REST probe template: login from
-  env credentials or token, JWT claims dump, GET baselines, and an IDOR
-  `--swap-param` mutation. Credentials only from env (`API_AUTH_EMAIL` /
-  `API_AUTH_PASS` / `API_AUTH_TOKEN`).
-- `make_deliverables.sh` — generate P6 deliverables with officecli:
-  `final-report.docx` + `findings.xlsx` / `evidence.xlsx` / `assets.xlsx`
-  (ledger CSVs imported with header/AutoFilter).
-- `evidence_capture.py` — one-shot evidence capture: write `evidence/raw/`,
-  compute SHA-256, create the redacted copy, append `evidence-ledger.csv`.
-- `surface_checklist.py` — per-surface P1/P2 hunting checklist from
-  `surface-inventory.csv` × the bundled taxonomy JSON (advisory; P0 remains
-  the source of truth).
-- `status.py` — compact engagement status: current phase, gate history,
-  per-ledger counts (open hypotheses, test states, evidence, findings).
-- `schemas.py` — *(internal module, not run directly)* shared ledger-schema
-  helpers: loads `config/ledger_schemas.json` and creates the engagement's CSV
-  ledgers with the correct headers. Imported by `new_engagement.py` and other
-  ledger-writing scripts.
+Load `references/tool-catalog.md` for helper quirks, script routing, and
+verification commands. Load `references/crawler-extras.md` only when the
+optional Scrapling or crawl4ai stages are present or requested. Keeping these
+catalogs out of the core prompt preserves the same tools without forcing their
+full descriptions into every engagement.
 
 ## Bundled assets
 
@@ -481,25 +354,31 @@ Non-obvious behaviors that bite on resume or reuse. Full detail in each script.
 - `references/bountyforge-judging.md` — 4-gate finding evaluation (Refutation
   → Reachability → Trigger → Impact) + severity adjustment + LEAD promotion,
   ported from BountyForge (P5).
+- `references/graphql-integration.md` — local GraphQL Cop install, readiness
+  checks, explicit execution contract, and evidence handling.
+- `references/web2-2026-references.md` — cited 2026 snapshot for ATO/IDOR,
+  business logic, injection, deserialization, race, privilege escalation,
+  fail-open, authorization, canonicalization, and configuration. Load only the
+  matching subsection through `references/context-router.md`.
 - `references/bountyforge-cvss.md` — CVSS 3.1 vector string scoring guide
   (AV/AC/PR/UI/S/C/I/A), ported from BountyForge (P5).
+- `references/attack-playbooks/` — 19 per-vuln-class black-box hunting playbooks
+  + `00-index.md` (priority ordering). Dedicated files: `unauth-access`, `rce`,
+  `file-upload`, `path-traversal`, `info-disclosure`, `logic-flaws`,
+  `arbitrary-x-authz`, `oauth-saml-jwt`, `sqli`, `ssrf-cache-host`, `api-rest`,
+  `graphql`, `race-conditions`, `xss`, `http-smuggling`, `mobile`,
+  `llm-prompt-injection`, `dos`, `intranet-postexp`. Cross-cutting classes are
+  folded into these (SSTI → `rce`/`ssrf-cache-host`; XXE → `rce`/`api-rest`/
+  `oauth-saml-jwt`; CSRF → `logic-flaws`/`api-rest`/`xss`). Each playbook:
+  entry-point frequency, probe techniques, bypass matrix, exploit/privesc
+  chains, evidence/CVSS notes, and compliance red lines. Ported from
+  `zhaoxuya520/reverse-skill` (src-hunter, MIT); read the index at P3 to design
+  the test matrix, re-check a playbook at P4 before each validation round.
+  Chinese prose, English payloads — hypotheses still require evidence-ledger
+  validation per `p4-validation.md`.
 
-## Crawler extras (scrapling + crawl4ai)
+## Crawler extras (Scrapling + crawl4ai)
 
-Both run automatically in the `active-crawl` stage when present; their URL output
-is merged into `urls_all.txt` and passes through the same scope guard as katana.
-
-- **Scrapling** (`scripts/scrapling_crawl.sh --input live_urls.txt`): stealth
-  fetch of anti-bot/JS pages. Runs through the bundled venv launcher
-  (`~/tools/scrapling/venv`).
-- **crawl4ai** (`scripts/crawl4ai_crawl.sh --input live_urls.txt`): JS-rendered link
-  discovery. Configure the interpreter with `VHS_CRAWL4AI_PYTHON` or its venv
-  directory with `VHS_CRAWL4AI_HOME`; the legacy local path is only a fallback.
-
-Verify both standalone:
-
-```bash
-printf 'https://example.com\n' > /tmp/seeds.txt
-python3 <skill-dir>/scripts/scrapling_crawl.py --input /tmp/seeds.txt
-<skill-dir>/scripts/crawl4ai_crawl.sh --input /tmp/seeds.txt
-```
+Load `references/crawler-extras.md` only when the optional crawler packages are
+present or requested. It contains the active-crawl behavior, scope guard, venv
+overrides, and standalone smoke command.

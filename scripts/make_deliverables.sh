@@ -16,7 +16,20 @@
 set -euo pipefail
 umask 077
 
-ENG="${1:?usage: make_deliverables.sh <engagement-dir>}"
+usage() {
+  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  usage
+  exit 0
+fi
+if [ "$#" -ne 1 ]; then
+  usage >&2
+  exit 2
+fi
+
+ENG="$1"
 ENG="$(cd "$ENG" && pwd)"
 
 if ! command -v officecli >/dev/null 2>&1; then
@@ -31,7 +44,14 @@ cd "$OUT"
 # Title from engagement.json if present
 TITLE="Security Assessment"
 if [ -f "$ENG/engagement.json" ]; then
-  TITLE=$(python3 -c "import json;print(json.load(open('$ENG/engagement.json')).get('title','Security Assessment'))" 2>/dev/null || echo "Security Assessment")
+  TITLE=$(python3 - "$ENG/engagement.json" <<'PY' 2>/dev/null || echo "Security Assessment"
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    print(json.load(handle).get("title", "Security Assessment"))
+PY
+  )
 fi
 
 echo "[*] building deliverables in $OUT"

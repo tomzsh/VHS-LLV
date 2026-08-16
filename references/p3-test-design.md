@@ -4,6 +4,12 @@
 
 Turn the attack-surface map into a risk-prioritized test matrix that is complete, safe, and traceable.
 
+> **Playbook input:** before drafting mutations, open `attack-playbooks/00-index.md`
+> and read the matching `attack-playbooks/<class>.md` for each surface. They supply
+> the high-frequency entry points, probe payloads, and bypass matrices per
+> vuln-class — turn those into concrete `TST-###` rows. Playbook content is a
+> hypothesis source, never a confirmed finding.
+
 ## Build tests from invariants
 
 For every in-scope surface:

@@ -2,16 +2,23 @@
 
 Use this file as the routing table. Read every selected file completely before acting.
 
-## Always load
+## Core/load policy
 
-- `operating-contract.md`
-- `non-qualifying.md` — always check before classifying a finding (saves effort on non-qualifying items)
-- `taxonomy-rating.md` — severity taxonomy (source: `vulnerability-rating-taxonomy.json`); load from P1 onward for invariant mapping + P1-P2 hunting checklist, mandatory at P5 for severity baseline
-- The current phase file
-- `evidence-standard.md` during P4, P5, or any PoC review
-- `reporting-templates.md` during P5 or P6
-- `officecli-reporting.md` during P6 when the deliverable needs `.docx`/`.xlsx`/`.pptx`
-- `oidc-session-refresh.md` during P3/P4 when the target uses Keycloak/OIDC and authenticated probing is needed
+- `context-router.md` first; it defines lazy-loading and fallback rules.
+- `operating-contract.md`, `index.md`, and the current phase file.
+- `non-qualifying.md` before classifying a finding.
+- `evidence-standard.md` before P4/P5 evidence review.
+- `taxonomy-rating.md` from P1 onward when modeling or rating severity.
+- `attack-playbooks/00-index.md` from P3 onward; load only selected playbooks.
+- `reporting-templates.md` and `officecli-reporting.md` only for P6 deliverables.
+- `module-index.md` at P3/P4; load only matching target modules.
+- `code-graph-rag-integration.md` only for source/SAST/code-graph work.
+- `web2-2026-references.md` when one of the requested Web2 vulnerability classes
+  is in scope; load only its matching subsection and selected playbook.
+- `account-otp.md` only for signup/OTP work.
+- `research-stage.md` only for disclosed research.
+- `operator-commands.md`, `tool-catalog.md`, or `crawler-extras.md` only when
+  their command/catalog/stage is needed.
 
 ## Current phase
 
@@ -20,8 +27,8 @@ Use this file as the routing table. Read every selected file completely before a
 | P0 | `p0-authorization.md` |
 | P1 | `p1-modeling.md` |
 | P2 | `p2-recon.md` |
-| P3 | `p3-test-design.md` |
-| P4 | `p4-validation.md`, `evidence-standard.md` |
+| P3 | `p3-test-design.md`, `attack-playbooks/00-index.md`, `module-index.md` (pick the module matching in-scope surface) |
+| P4 | `p4-validation.md`, `evidence-standard.md`, `attack-playbooks/<type>.md` (re-check before each round) |
 | P5 | `p5-triage.md`, `evidence-standard.md`, `reporting-templates.md` |
 | P6 | `p6-report-retest.md`, `evidence-standard.md`, `reporting-templates.md`, `officecli-reporting.md` |
 

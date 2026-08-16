@@ -4,6 +4,11 @@
 
 Safely confirm or reject hypotheses with minimal, reproducible evidence.
 
+> **Playbook re-check:** before each validation round, re-open the relevant
+> `attack-playbooks/<class>.md` for the exact probe/bypass variant and the
+> evidence/CVSS notes it lists. A playbook match is still a hypothesis — only
+> the captured `EV-###` evidence confirms it.
+
 ## Validation sequence
 
 For each `TST-###`:
