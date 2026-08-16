@@ -59,6 +59,7 @@ import json, sys
 path = sys.argv[sys.argv.index('-oJ') + 1]
 open(path, 'w', encoding='utf-8').write(json.dumps({
     'results': [
+        {'url': 'https://['},
         {'url': 'https://api.example.com/discovered?x=1'},
         {'url': 'https://evil.test/discovered?x=1'},
     ]

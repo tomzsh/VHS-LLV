@@ -220,7 +220,10 @@ def extract_json_urls(value: object) -> set[str]:
         return urls
     if isinstance(value, str):
         candidate = value.strip()
-        parsed = urlsplit(candidate)
+        try:
+            parsed = urlsplit(candidate)
+        except ValueError:
+            return set()
         if parsed.scheme.lower() in {"http", "https"} and parsed.hostname:
             return {candidate}
     return set()
