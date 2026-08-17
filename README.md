@@ -250,34 +250,37 @@ controlled-impact actions.
 
 ## Workflow
 
-The infographic above is the compact visual summary. The Mermaid view below
-shows the decision paths behind it: authorization remains a hard gate, the
-router loads only active modules, and every validation path ends in evidence,
-triage, and reporting.
+The infographic above is the compact visual summary. The Mermaid view below is
+intentionally vertical for narrow screens: authorization remains a hard gate,
+the router loads only active modules, and every validation path ends in
+evidence, triage, and reporting.
 
 ```mermaid
-flowchart LR
+flowchart TD
     P0{"P0 · Authorization"}
-    P0 -->|No| STOP["STOP · obtain authorization"]
-    P0 -->|Yes| PROFILE{"Least-invasive profile"}
+    P0 -->|No| STOP["STOP<br/>obtain authorization"]
+    P0 -->|Yes| PROFILE{"Select profile"}
     PROFILE -->|plan-only| PLAN["Plan + manifest<br/>no target traffic"]
-    PROFILE -->|passive / active / scanner| P1["P1 · Threat model"]
     PLAN --> MANIFEST["Execution manifest"]
+    PROFILE -->|authorized run| P1["P1 · Threat model"]
 
     P1 --> P2["P2 · Surface map"]
     P2 --> P3["P3 · Test design"]
-    P3 --> ROUTER{"Lazy-load router<br/>phase + active ledger"}
-    ROUTER -->|none active| P4["P4 · Controlled validation"]
-    ROUTER -->|review needed| REVIEW["Critical review<br/>one bounded row / test"]
-    ROUTER -->|credible signal| DEEP["Dig-deeper chain<br/>max 3 hops"]
-    ROUTER -->|in-scope asset path| PIVOT["Pivot ladder<br/>allowlist + max 3 hops"]
-    ROUTER -->|composite finding| KILL["Kill-chain<br/>P5 analysis only"]
-    REVIEW --> P4
-    DEEP --> P4
-    PIVOT --> P4
+    P3 --> ROUTER["Lazy-load router<br/>phase + active ledger"]
+
+    subgraph OPTIONAL["Active modules · lazy-load"]
+        direction TB
+        REVIEW["Critical review<br/>P3–P5 · one row / test"]
+        DEEP["Dig-deeper<br/>P3–P4 · max 3 hops"]
+        PIVOT["Pivot ladder<br/>P4–P5 · allowlist + max 3"]
+        KILL["Kill-chain<br/>P5 · composite only"]
+    end
+
+    ROUTER --> OPTIONAL
+    OPTIONAL --> P4["P4 · Controlled validation"]
     P4 -->|evidence + control pass| P5["P5 · Triage + severity"]
-    P4 -->|fails validation| REJECT["Reject / keep hypothesis"]
-    KILL --> P5
+    P4 -->|fails validation| REJECT["Reject<br/>keep hypothesis"]
+    KILL -.-> P5
     P5 --> P6["P6 · Redacted report + retest"]
 
     MEMORY[("Per-engagement<br/>local ledgers")]
