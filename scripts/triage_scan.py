@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
-import subprocess
 import sys
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -54,7 +56,7 @@ def output_path(root: Path, manifest: dict, key: str, legacy: str) -> Path:
     return path
 
 
-def load_baselines(path: Path) -> dict[str, tuple[str, int]]:
+def load_baselines(path: Path) -> dict[str, tuple[str, int, str]]:
     if not path.exists():
         return {}
     if path.suffix == ".json":
@@ -62,24 +64,29 @@ def load_baselines(path: Path) -> dict[str, tuple[str, int]]:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             return {}
-        result: dict[str, tuple[str, int]] = {}
+        result: dict[str, tuple[str, int, str]] = {}
         if isinstance(data, dict):
             for host, item in data.items():
                 if not isinstance(item, dict):
                     continue
                 try:
-                    result[str(host)] = (str(item["status"]), int(item["size"]))
+                    result[str(host)] = (
+                        str(item["status"]),
+                        int(item["size"]),
+                        str(item.get("head_sha256_12", "")),
+                    )
                 except (KeyError, TypeError, ValueError):
                     continue
         return result
     result = {}
     for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
         parts = line.strip().split()
-        if len(parts) != 3:
+        if len(parts) < 3:
             continue
-        url, status, size = parts
+        url, status, size = parts[0], parts[1], parts[2]
+        head = parts[3] if len(parts) > 3 else ""
         try:
-            result[origin(url)] = (status, int(size))
+            result[origin(url)] = (status, int(size), head)
         except ValueError:
             continue
     return result
@@ -99,37 +106,52 @@ def load_nuclei(path: Path) -> list[dict]:
     return findings
 
 
-def live_probe(url: str, timeout: int) -> tuple[str, int] | None:
+SOFT_404_MARKERS = ("404", "not found", "page not found", "doesn't exist", "does not exist")
+
+
+def live_probe(url: str, timeout: int) -> tuple[str, int, str, bool] | None:
+    """Fetch status, size, head hash, and a soft-404 marker hit for one URL."""
+    request = urllib.request.Request(
+        url, method="GET", headers={"User-Agent": "security-research (authorized)"}
+    )
     try:
-        process = subprocess.run(
-            [
-                "curl", "-sS", "-o", "/dev/null", "-w", "%{http_code} %{size_download}",
-                "--max-time", str(timeout), "--max-redirs", "0", url,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=timeout + 5,
-            check=False,
-        )
-        if process.returncode != 0:
-            return None
-        status, size = process.stdout.strip().split()
-        if status == "000":
-            return None
-        return status, int(float(size))
-    except (OSError, subprocess.TimeoutExpired, ValueError):
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            status = str(getattr(response, "status", None) or response.getcode() or 0)
+            head = response.read(2048)
+    except urllib.error.HTTPError as exc:
+        status = str(exc.code)
+        head = (exc.read(2048) if hasattr(exc, "read") else b"") or b""
+    except (urllib.error.URLError, OSError, ValueError):
         return None
+    if status in {"0", "None"}:
+        return None
+    low = head.decode("utf-8", "replace").lower()
+    return (
+        status,
+        len(head),
+        hashlib.sha256(head).hexdigest()[:12],
+        any(marker in low for marker in SOFT_404_MARKERS),
+    )
 
 
-def verdict(baseline: tuple[str, int] | None, live: tuple[str, int] | None) -> str:
+def verdict(
+    baseline: tuple[str, int, str] | None,
+    live: tuple[str, int, str, bool] | None,
+) -> str:
     if live is None:
         return "unreachable"
     if baseline is None:
         return "needs_review"
-    baseline_status, baseline_size = baseline
-    live_status, live_size = live
+    baseline_status, baseline_size, baseline_head = baseline
+    live_status, live_size, live_head, marker_hit = live
     if live_status != baseline_status:
         return "needs_review"
+    # Content signal: a different body than the soft-404 baseline is never a
+    # likely false positive, even when the sizes happen to match.
+    if baseline_head and live_head and live_head != baseline_head:
+        return "needs_review"
+    if marker_hit and (baseline_size == 0 or abs(live_size - baseline_size) <= max(1, baseline_size)):
+        return "likely_fp"
     if baseline_size == 0:
         return "likely_fp" if live_size == 0 else "needs_review"
     return "likely_fp" if abs(live_size - baseline_size) / baseline_size <= SIZE_TOLERANCE else "needs_review"

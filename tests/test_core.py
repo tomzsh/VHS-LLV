@@ -93,7 +93,7 @@ class ReferenceIntegrityTests(unittest.TestCase):
         router = (SKILL / "references" / "context-router.md").read_text(encoding="utf-8")
         index = (SKILL / "references" / "index.md").read_text(encoding="utf-8")
         skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("version: 2.7.0", skill)
+        self.assertIn("version: 2.8.0", skill)
         self.assertIn("web2-2026-references.md", router)
         self.assertIn("web2-2026-references.md", index)
         for term in (
@@ -657,9 +657,27 @@ class ContextSliceTests(unittest.TestCase):
                 self.assertNotIn("## 4. Bypass", process.stdout)
                 self.assertNotIn("## 5. 利用", process.stdout)
 
-    def test_safe_playbook_refuses_evasion_or_post_exploitation_sections(self) -> None:
+    def test_safe_playbook_routes_bypass_matrix_with_safety(self) -> None:
+        process = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "context_slice.py"),
+                "--file",
+                str(SKILL / "references" / "attack-playbooks" / "rce.md"),
+                "--safe-playbook",
+                "--section",
+                "4. Bypass 矩阵",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertIn("## 4. Bypass", process.stdout)
+        self.assertIn("## 8. 不要做的事", process.stdout)
+
+    def test_safe_playbook_refuses_exploitation_or_post_exploitation_sections(self) -> None:
         for filename, section in (
-            ("rce.md", "4. Bypass 矩阵"),
             ("rce.md", "5. 利用提权 / 横向"),
         ):
             with self.subTest(section=section):
@@ -783,6 +801,18 @@ class SchemaTests(unittest.TestCase):
 
 
 class ToolCheckTests(unittest.TestCase):
+    def test_graphql_cop_help_is_side_effect_free_and_successful(self) -> None:
+        process = subprocess.run(
+            ["bash", str(SCRIPTS / "graphql_cop.sh"), "--help"],
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertIn("Usage: graphql_cop.sh", process.stdout)
+        self.assertEqual(process.stderr, "")
+
     def test_naabu_initialization_error_is_not_reported_ready(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             fakebin = Path(temp) / "bin"
@@ -1915,6 +1945,122 @@ class KillChainTests(unittest.TestCase):
             res = self._run(root)
             # only finding was rejected -> nothing to chain -> exit 1
             self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+
+
+class ZeroFindingGateTests(unittest.TestCase):
+    """Persistence protocol: premature zero-finding conclusions must fail P5/P6."""
+
+    def _make_engagement(self, root: Path) -> None:
+        root.mkdir(parents=True, exist_ok=True)
+        state = {
+            "schema_version": 2,
+            "current_phase": "P5",
+            "phases": {p: {"status": "completed" if p < "P5" else "in_progress",
+                            "completed_at": None, "gate_notes": ""}
+                       for p in ["P0", "P1", "P2", "P3", "P4", "P5"]},
+            "redaction_reviewed": False,
+            "disclosure_status": "draft",
+            "retest_status": "not_started",
+        }
+        (root / "state.json").write_text(json.dumps(state), encoding="utf-8")
+        (root / "engagement.json").write_text(json.dumps({
+            "title": "t", "target": "example.com", "authorization_status": "confirmed",
+        }), encoding="utf-8")
+
+    def _write_csv(self, root: Path, name: str, rows: list[dict]) -> None:
+        if not rows:
+            (root / name).write_text("", encoding="utf-8")
+            return
+        import csv as _csv
+        with (root / name).open("w", newline="", encoding="utf-8") as fh:
+            writer = _csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
+
+    def _empty_ledgers(self, root: Path) -> None:
+        from schemas import LEDGER_SCHEMAS
+        for name, headers in LEDGER_SCHEMAS.items():
+            if not (root / name).exists():
+                self._write_csv(root, name, [{h: "" for h in headers}])
+
+    def test_p5_refuses_zero_findings_without_exhaustion(self) -> None:
+        import sys as _sys
+        scripts = str(SKILL / "scripts")
+        if scripts not in _sys.path:
+            _sys.path.insert(0, scripts)
+        import gate_check as gc
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._make_engagement(root)
+            self._empty_ledgers(root)
+            errors: list[str] = []
+            tests = [dict(row) for row in gc.read_csv(root / "test-matrix.csv")]
+            findings = [dict(row) for row in gc.read_csv(root / "findings-index.csv")]
+            gc.check_zero_finding_exhaustion(root, tests, findings, errors)
+            joined = " ".join(errors)
+            self.assertIn("0 executed test(s)", joined)
+            self.assertIn("0 distinct playbook(s)", joined)
+            self.assertIn("coverage-exhaustion.md is missing", joined)
+
+    def test_p5_zero_finding_passes_with_exhaustion(self) -> None:
+        import sys as _sys
+        scripts = str(SKILL / "scripts")
+        if scripts not in _sys.path:
+            _sys.path.insert(0, scripts)
+        import gate_check as gc
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._make_engagement(root)
+            self._empty_ledgers(root)
+            playbooks = ["sqli", "xss", "graphql"]
+            tests = []
+            for i in range(12):
+                tests.append({
+                    "test_id": f"T-{i:03d}", "hypothesis_id": "", "asset_id": "",
+                    "surface_id": "", "baseline": "b", "mutation": "m",
+                    "expected_result": "e", "negative_control": "n",
+                    "evidence_plan": "", "cleanup": "c", "risk": "low",
+                    "permission_mode": "ACTIVE_SAFE", "status": "rejected",
+                    "evidence_ids": "", "notes": f"playbook: {playbooks[i % 3]}",
+                })
+            self._write_csv(root, "test-matrix.csv", tests)
+            (root / "coverage-exhaustion.md").write_text(
+                "# Coverage exhaustion\nAll avenues tested.", encoding="utf-8")
+            errors: list[str] = []
+            parsed_tests = [dict(row) for row in gc.read_csv(root / "test-matrix.csv")]
+            findings = [dict(row) for row in gc.read_csv(root / "findings-index.csv")]
+            gc.check_zero_finding_exhaustion(root, parsed_tests, findings, errors)
+            self.assertEqual(errors, [])
+
+    def test_p5_with_findings_skips_exhaustion_check(self) -> None:
+        import sys as _sys
+        scripts = str(SKILL / "scripts")
+        if scripts not in _sys.path:
+            _sys.path.insert(0, scripts)
+        import gate_check as gc
+        from schemas import LEDGER_SCHEMAS as _SCHEMAS
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._make_engagement(root)
+            self._empty_ledgers(root)
+            headers = _SCHEMAS["findings-index.csv"]
+            findings = [{
+                "finding_id": "F-001", "title": "t", "root_cause": "r",
+                "affected_assets": "a", "status": "triaged", "severity": "medium",
+                "severity_rationale": "sr", "confidence": "high", "prerequisite": "p",
+                "demonstrated_impact": "di", "evidence_ids": "",
+                **{h: "" for h in headers if h not in {
+                    "finding_id", "title", "root_cause", "affected_assets", "status",
+                    "severity", "severity_rationale", "confidence", "prerequisite",
+                    "demonstrated_impact", "evidence_ids"}},
+            }]
+            errors: list[str] = []
+            tests = [dict(row) for row in gc.read_csv(root / "test-matrix.csv")]
+            gc.check_zero_finding_exhaustion(root, tests, findings, errors)
+            self.assertEqual(errors, [])
 
 
 if __name__ == "__main__":

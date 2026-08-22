@@ -26,6 +26,7 @@
 | 🟠 P1 | `oauth-saml-jwt.md` | redirect_uri / state / JWT alg / kid / SAML 包裹 |
 | 🟠 P1 | `sqli.md` | 27,732 个真实案例提炼，含高频参数频率表 |
 | 🟠 P1 | `ssrf-cache-host.md` | 内网探测 + 云元数据 + Host header / 缓存投毒 |
+| 🟠 P1 | `subdomain-takeover.md` | 悬空 CNAME / 指纹库（Heroku/Shopify/S3…，先查程序政策）|
 | 🟡 P1/P2 | `api-rest.md` | BOLA / Mass Assignment / 速率 / CORS |
 | 🟡 P1/P2 | `graphql.md` | Introspection / 嵌套 IDOR / DoS |
 | 🟡 P2 | `race-conditions.md` | 优惠券双花 / 余额超扣 / 限额绕过 |

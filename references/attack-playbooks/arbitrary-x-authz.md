@@ -326,6 +326,56 @@ GET /api/system/config
 
 ---
 
+## 6.5 非可枚举 ID（UUID/GUID）与多租户切换——现代 SaaS 最高产的 critical 组合
+
+> UUID 不等于安全。ID 不可猜 ≠ ID 不可得：漏洞往往在"ID 泄漏面"与"租户上下文校验缺失"。
+
+### 6.5.1 UUID/GUID 泄漏面清单（先拿 ID，再复用）
+
+```
+泄漏面优先级（按命中率）：
+1. 创建响应回显   → POST /api/orders 的响应含 "id":"<uuid>"——别人的资源呢？
+2. 列表接口越界   → GET /api/orders?user_id=<other> 或翻页游标含他人 UUID
+3. 导出/日志/邮件 → 导出 CSV、通知邮件链接、PDF 引用他人 UUID
+4. 前端 bundle    → JS 里硬编码的 admin/内部对象 UUID、map 文件的测试数据
+5. URL Referrer   → 从 A 站点跳转携带资源链接到 B 站点
+6. UUIDv1 时间戳  → 版本位是 1 的 UUID 含 MAC+时间，可预测邻近 ID（v4 不可）
+```
+
+```
+# 复用探测（双账号 A/B）
+A: POST /api/documents → id_a = 响应 uuid
+B: GET  /api/documents/<id_a>          → 200 = IDOR（B 读到 A 的文档）
+B: PUT  /api/documents/<id_a> ...      → 200 = 可写 IDOR（升级）
+工具：scripts/identity_diff.py --endpoint-file urls.txt（VHS_IDA_*/VHS_IDB_* 环境变量供凭据）
+```
+
+### 6.5.2 租户 / 组织上下文切换（org-switch）
+
+```
+切换载体全试一遍（同一"跨租户读 B 组织数据"目标）：
+- Header：X-Org-Id / X-Tenant-Id / X-Workspace-Id: <B_org_id>
+- Cookie：org=<B_org_id>、tenant=<B_org_id>
+- Body：  org_id / tenantId / workspaceId / groupId / account_id 字段替换
+- Path：  /api/orgs/<B_org_id>/users、/t/<B_org_id>/...
+org_id 的来源：公开注册页、邀请邮件、公开团队页、创建组织响应。
+```
+
+```
+# 组合拳：邀请流 + 切换
+1. A(组织O1) 邀请 B → B 的邀请链接/邮件含 O1 org_id 与内部 endpoint
+2. B 自建组织 O2，用 O2 会话访问 O1 上下文接口（应为 403）
+3. 试：改 org_id 为 O1 + 调用 O1 的 members 列表 / billing / SSO 配置读取
+4. 跨组织对象：O2 上传文件 → O1 的文件接口用 O2 file uuid 尝试读取
+```
+
+### 6.5.3 判定与升级
+
+```
+同形状不同数据 = data_diff（identity_diff 术语）→ P4 验证 → 命中即 Broken Access Control
+升级链：跨租户读 → 跨租户写（改配置/成员角色）→ 租户接管（改 O1 域名校验/SSO）
+```
+
 ## 7. 通用探测协议（适用于所有 6 子类）
 
 ### 7.1 双账号 + 三角色测试

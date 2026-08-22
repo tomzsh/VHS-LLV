@@ -13,11 +13,17 @@ HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)\s*$")
 FENCE_OPEN_RE = re.compile(r"^[ \t]*([`~])\1{2,}")
 NUMBERING_RE = re.compile(r"^\s*\d+(?:\.\d+)*[.)]?\s*")
 FORBIDDEN_SECTION_RE = re.compile(
-    r"\bbypass\b|\bevasion\b|\bpost[- ]?exploitation\b|"
+    r"\bevasion\b|\bpost[- ]?exploitation\b|"
     r"\bddos\b|\bdos\b|\bdenial[- ]?of[- ]?service\b|"
-    r"绕过|利用|提权|横向|权限维持|持久化|反弹\s*shell|拒绝服务|拒絕服務",
+    r"利用|提权|横向|权限维持|持久化|反弹\s*shell|拒绝服务|拒絕服務",
     re.IGNORECASE,
 )
+# Vocabulary note: the English word "bypass" and its Chinese synonym 绕过 are
+# deliberately NOT forbidden terms. Per-vuln-class "Bypass 矩阵" sections are
+# input-filter/WAF technique variants for one vulnerability class - standard
+# authorized-testing knowledge the P3 test designer needs. Detection evasion,
+# exploitation/privesc/lateral movement, persistence, DoS, and post-exploitation
+# categories remain refused above and safety sections are always attached.
 FORBIDDEN_PLAYBOOKS = {"dos.md", "intranet-postexp.md"}
 SAFETY_TITLES = {"不要做的事", "compliance", "safety", "do not", "do not do"}
 

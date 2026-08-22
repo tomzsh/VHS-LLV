@@ -46,7 +46,7 @@ E0 is usually a lead, not a confirmed high-impact finding. E2 using two owned ac
 - For data exposure: record schema, count estimate, and one synthetic row where possible; do not bulk retrieve.
 - For token issues: prove acceptance only against an owned identity and record exact validation failure.
 - For code or command execution: use a harmless marker and environment-isolated proof; do not establish a shell, persistence, or lateral movement.
-- For SSRF-like behavior: use a researcher-controlled callback and stop before internal metadata or credential access.
+- For SSRF-like behavior: use a researcher-controlled callback first. Prove internal-network reachability with a non-sensitive internal probe (a researcher-controlled or program-approved canary endpoint, an internal-only service banner, or an internal RFC1918 address that answers without exposing data) — do NOT fetch cloud metadata credentials or any real secrets without the program's explicit written approval for that escalation. If the program approves a metadata proof, use a canary role/identity where possible, capture only the fact of access (status/header presence, redacted), notify the program immediately, and record approval in the evidence ledger.
 - For financial logic: use testnet, sandbox, fork, or minimal owned test funds and pre-agreed limits.
 - For contract behavior: reproduce on a fork with pinned block and state before considering a live-chain proof.
 

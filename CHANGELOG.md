@@ -1,5 +1,144 @@
 # Changelog
 
+## 2.8.0 — critical-yield upgrade: detection engine, playbooks, proportional gates
+
+Track A — detection engine:
+- Authenticated scanning: `--auth-profile NAME` injects a session (env-only
+  `VHS_AUTH_<NAME>_COOKIE` / `VHS_AUTH_<NAME>_BEARER`) into katana, arjun,
+  ffuf, nuclei, and dalfox. Credentials never enter argv, run configs,
+  manifests, or logs (`redact_command` masks them and resume fingerprints
+  exclude them), unlocking authenticated IDOR/authz/logic coverage.
+- Added `scripts/fingerprint_cve.py` + `references/kev-snapshot.json`: offline
+  fingerprint→CVE/KEV correlation over httpx tech-detect and naabu banners,
+  ranked known-exploited-first, `--append-hypotheses` imports leads as
+  HYP-CVE rows. Wired as orchestrator stage `35-fingerprint-cve` (local-only).
+- Added `scripts/takeover_check.py` + `references/takeover-fingerprints.json`:
+  DNS-only dangling-CNAME subdomain-takeover screening (26 services,
+  claimable/partial/discontinued statuses). Never claims resources — claiming
+  stays a manual, program-approved controlled-impact action. Stage
+  `38-takeover-check`.
+- Added `scripts/header_probe.py` + stage `45-header-probe`: GET-only CORS
+  reflection (arbitrary/null origin × credentials) and missing-header
+  inventory; high-value signals import as HYP-HDR rows.
+- Added `scripts/race_probe.py`: bounded race harness (barrier-parallel and
+  HTTP/1.1 last-byte-sync pipeline modes, hard cap 50, single burst). Requires
+  explicit `race_testing` in allowed_methods; state-changing methods also need
+  `--allow-state-change` plus method permission (api_auth_probe semantics).
+- Discovery depth: ffuf gains `-recursion -recursion-depth 2`, `--extensions`,
+  `--vhost` Host-header enumeration, and a merged wordlist including paths
+  extracted from JS bundles; `--port-set top1000` widens naabu when port
+  scanning is authorized; defaults raised (`--max-hosts` 30, `--max-js-files`
+  150).
+- Blind/OOB workflow: `sqlmap.sh` gains `VHS_SQLMAP_PRESET=blind`
+  (boolean+time, level 3 risk 2) and refuses controlled-impact flags
+  (`--os-shell/--os-pwn/--os-cmd/--privileged`); new `sqli-oob` payload
+  section (MSSQL xp_dirtree/OPENROWSET UNC, MySQL LOAD_FILE UNC, Oracle
+  UTL_HTTP/UTL_INADDR, PostgreSQL dblink, sqlmap `--dns-domain`).
+- Triage `verdict()` is now multi-signal: status-code delta, body-head hash
+  comparison against the soft-404 baseline (baselines now record
+  `head_sha256_12`), and soft-404 content markers — same-size clones are no
+  longer mislabelled likely_fp and content-differing responses surface for
+  review.
+
+Track B — playbooks and finding policy:
+- New playbook `attack-playbooks/subdomain-takeover.md` (registered in
+  00-index.md): leak surfaces, dangling verification, fingerprint table,
+  value-escalation paths, evidence/CVSS guidance, and red lines (claim =
+  controlled impact; program policy governs eligibility).
+- P3 unblinding: per-vuln-class "Bypass 矩阵" sections are now routable through
+  `context_slice.py --safe-playbook` with the compliance section still
+  attached; detection-evasion, exploitation/privesc/lateral movement,
+  persistence, DoS, and post-exploitation categories remain refused and
+  whole-playbook blocks (dos.md, intranet-postexp.md) are unchanged.
+- Playbook additions: UUID/GUID leak-then-reuse + org/tenant-switch
+  (arbitrary-x-authz 6.5), PKCE bypass & code-handling attacks
+  (oauth-saml-jwt 3.2b), field suggestions / persisted queries / alias races /
+  subscriptions (graphql 3.6b–3.6e), modern single-packet racing
+  (race-conditions 3.2).
+- `non-qualifying.md` is now explicitly a default template overridden by the
+  target program's policy: subdomain takeover is no longer globally excluded,
+  and blind SSRF qualifies when internal reachability is proven.
+- `p4-validation.md` SSRF proof pattern: authorized escalation ladder
+  (researcher-controlled callback → non-sensitive internal reachability proof
+  → metadata/credential proof only with explicit program approval, canary
+  identity where possible, immediate disclosure).
+- Taxonomy: added priority-1 anchors for SQLi (auth-bypass admin access, OOB
+  exfil), RCE (unauthenticated, deserialization chain), XXE (file disclosure
+  to credential theft); SSRF Internal Secrets Exposure raised P2→P1 to match
+  the documented critical hunt list.
+- Fixed `http-smuggling.md` binary detection (embedded literal NUL byte
+  escaped) so grep/context tooling can slice it.
+
+Track C — proportional throughput (authorization model unchanged):
+- P4 critical review is proportional: full 12-field adversarial review only
+  for confirmed tests; rejected/blocked/inconclusive/not_applicable tests need
+  a bounded decision record (id/hypothesis/test/decision/reviewer/timestamp).
+- P3 test matrix is tiered: read-only probes (permission_mode PASSIVE or a
+  `read-only` tag in notes) skip auto-derivable fields
+  (negative_control/cleanup/risk); state-changing tests keep the full set.
+- `playbooks_loaded` is satisfied automatically when every test row cites a
+  playbook; `--mark-playbooks` remains available.
+- Authorization/scope invariants untouched: P0 gate, deny-override scope,
+  scope-narrowing-only, method/login gating, redirect containment, evidence
+  integrity, testing window, and the tests locking them all stay green.
+
+## 2.7.4 — stack-aware prioritization and role matrix
+
+- Added `scripts/playbook_prioritizer.py`: ranks the 19 attack playbooks by
+  expected yield from recon evidence (httpx technology fingerprints, discovered
+  URL patterns). Baseline playbooks always listed; others need a stack/URL
+  signal. Excludes dos/intranet-postexp/mobile (gated surfaces). Output feeds
+  P3 test-design ordering.
+- Added `scripts/role_matrix.py`: privilege-escalation role×action matrix.
+  Plan mode generates cells with expected outcomes (allow/deny/owner_only);
+  audit mode cross-checks every cell against test-matrix.csv and `--enforce`
+  exits 1 while untested cells remain.
+- Registered both in SKILL.md (P3/P4 sections).
+
+## 2.7.3 — critical-finding yield and throughput upgrades
+
+- Added `scripts/identity_diff.py`: identity differential engine for P4. Probes
+  the same endpoints under two identities (env-based tokens or per-identity
+  login) and classifies each response pair (identical / data_diff /
+  access_diff / shape_diff), flagging value diffs on sensitive fields
+  (balance, email, role, owner...) as strong IDOR/BOLA candidates. Supports
+  `--swap-param/--swap-values` object mutation per endpoint.
+- Added `scripts/js_deep_parse.py` + wired a `jsluice-deep-parse` step into the
+  orchestrator's active-crawl stage: downloads discovered JS bundles
+  (scope-checked, rate-limited, GET-only), extracts hidden API endpoints and
+  embedded secrets via jsluice, writes scoped URL list + secrets JSON.
+- ffuf discovery now runs as a parallel worker pool across targets
+  (`--discovery-workers`, default 4) instead of sequential per-target loops.
+- Added `--include-medium` to add medium-severity nuclei results (chaining
+  material for composite criticals).
+- Registered `identity_diff.py` usage in SKILL.md P4 section.
+- Regression tests: ZeroFindingGateTests (3 cases) cover the persistence gate;
+  full suite green.
+
+## 2.7.2 — zero-finding persistence protocol
+
+- Added `references/persistence-protocol.md`: hard requirements before any
+  engagement may conclude 0 findings (executed surface coverage, playbook
+  rotation, identity matrix, multi-source discovery, second-pass mutations,
+  signal accounting, profile escalation) plus a 10-rung escalation ladder and
+  anti-pattern list.
+- Added `check_zero_finding_exhaustion()` to `scripts/gate_check.py`, enforced
+  at both P5 and P6: a zero-finding advance now requires ≥10 finalized tests,
+  ≥2 distinct executed playbooks, and a `coverage-exhaustion.md` document.
+  Engagements with findings are unaffected.
+- Registered the protocol in SKILL.md so it loads when an engagement trends
+  toward a zero-finding conclusion.
+- Verified: gate refuses premature zero-finding conclusion; passes once
+  exhaustion requirements are met; negative control with findings skips the
+  check.
+
+## 2.7.1 — GraphQL launcher help contract
+
+- Fixed `scripts/graphql_cop.sh --help` to return success and show usage before
+  requiring an engagement or target.
+- Added an offline regression test for the side-effect-free help path.
+- No target behavior, authorization policy, or GraphQL execution contract changed.
+
 ## 2.7.0 — progressive context loading and final audit hardening
 
 - Added the deterministic, no-network `scripts/context_slice.py` helper for

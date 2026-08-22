@@ -74,8 +74,10 @@ python3 scripts/context_slice.py --file references/attack-playbooks/rce.md \
 Copy complete heading text from `--outline`; partial substring terms are not
 accepted in safe playbook mode. The safe route retains parent methodology,
 automatically includes the playbook's compliance/safety section, and fails
-closed on bypass/evasion, DoS, lateral-movement, persistence, or
-post-exploitation categories. `--full` prints the source byte-for-byte for P4
+closed on evasion, exploitation/lateral-movement, persistence, DoS, or
+post-exploitation categories; per-vuln-class "Bypass 矩阵" sections are
+routable at P3 so test design sees filter-bypass variants. `--full` prints
+the source byte-for-byte for P4
 exact validation. The helper ignores heading-like lines inside fenced code
 blocks.
 

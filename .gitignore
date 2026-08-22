@@ -42,3 +42,4 @@ __pycache__/
 
 # Superpowers implementation worktrees
 .worktrees/
+.zcode/

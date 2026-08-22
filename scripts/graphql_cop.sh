@@ -11,6 +11,25 @@ ENGAGEMENT=""
 TARGET=""
 TOOL_ARGS=()
 
+usage() {
+    cat <<'USAGE'
+Usage: graphql_cop.sh --engagement DIR -t URL [GraphQL-Cop options]
+
+Required:
+  --engagement DIR   Authorized VHS engagement directory
+  -t, --target URL   Explicit in-scope GraphQL endpoint
+
+The launcher validates P0, the testing window, permission mode, and scope
+before starting GraphQL Cop. Use the upstream GraphQL Cop options after the
+required VHS arguments.
+USAGE
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    usage
+    exit 0
+fi
+
 fatal() {
     echo "FATAL: $*" >&2
     exit 2

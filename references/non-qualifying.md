@@ -1,5 +1,14 @@
 # Non-Qualifying Vulnerabilities
 
+> **This file is a DEFAULT exclusion list, not the authority.** The authoritative
+> policy is the target program's own rules (recorded in `engagement.json`
+> `scope_source` at P0). Before classifying any finding as non-qualifying, check
+> the program's published policy — many programs explicitly reward classes that
+> appear below (notably subdomain takeover, rate-limit, and session-invalidation
+> issues). When the program policy conflicts with this list, the program wins.
+> Copy this template into `<engagement>/program-policy.md` and strike/add rows to
+> mirror the real program before P5 triage.
+
 The following issues are **generally not eligible** for rewards under the bug bounty program. Reports containing only these findings will typically be closed as **Informative** or **Not Applicable** unless a demonstrable security impact can be shown.
 
 ---
@@ -17,7 +26,8 @@ The following issues are **generally not eligible** for rewards under the bug bo
 | HTTP Strict Transport Security (HSTS) Header | ❌ |
 | Missing Security-Related HTTP Headers | ❌ |
 | HTTP Host Header based XSS / Open Redirect (unexploitable) | ❌ |
-| Blind SSRF without direct impact (e.g. DNS pingback only) | ❌ |
+| Blind SSRF with external-callback evidence only and no demonstrable internal reachability | ❌ |
+| Blind SSRF **with** proven internal network reachability (or an authorized program-approved canary hit) | ✅ |
 | Self-XSS or XSS without impact on other users | ❌ |
 | User Enumeration (email, phone number, GUID, alias) | ❌ |
 | Lack of Rate Limiting / Brute Force / CAPTCHA | ❌ |
@@ -106,7 +116,7 @@ The following report types are outside the scope of the program.
 - Google API Keys (including Google Maps) that are publicly disclosed or misconfigured.
 - Password reset token leaks via trusted third-party Referer headers (e.g., Google Analytics, Facebook).
 - Exposed secrets or credentials on organization-controlled assets that are unrelated to the program's scope.
-- Subdomain takeover findings.
+- Subdomain takeover findings **only when the program excludes them**; takeovers with a verified claimable dangling resource are rewarded by many programs — check the program policy before discarding.
 - Hypothetical vulnerabilities without a working exploit or demonstrable impact.
 
 ---

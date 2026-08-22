@@ -1,7 +1,7 @@
 ---
 name: vhs
 description: "WEB2/GraphQL pentest and bug-bounty code-audit, P0-P6 gates. Primary web2 entry-point skill — IDOR/object-level access, GraphQL auth/schema testing, file access, export/auth-bypass, injection-to-RCE, SSRF, business-logic & race/dedup flaws, authorized web/app/API/mobile testing."
-version: 2.7.0
+version: 2.8.0
 author: tomzsh
 platforms: [linux]
 metadata:
@@ -97,9 +97,11 @@ Resolve paths relative to this `SKILL.md`, then read:
    ```
 
    Safe playbook mode requires exact outline-derived headings, automatically
-   includes the playbook's compliance/safety section, and refuses bypass/evasion,
+   includes the playbook's compliance/safety section, and refuses evasion,
    exploitation/lateral-movement, persistence, DoS, and post-exploitation
-   categories. Use `--full` for P4 exact validation. The
+   categories. Per-vuln-class "Bypass 矩阵" sections ARE routable at P3 (with
+   the compliance section attached) so test design is not blind to
+   filter-bypass variants. Use `--full` for P4 exact validation. The
    helper is read-only and does not replace the full imported playbook.
 2. `references/operating-contract.md`, `references/index.md`, and the current
    phase reference.
@@ -276,6 +278,80 @@ python3 <skill-dir>/scripts/kill_chain_vhs.py ./engagement \
 BountyForge `kill_chain.py`.)
 | P6 | report, disclose, retest | `p6-report-retest.md` | final report |
 
+## Identity differential testing (P4)
+
+Load `scripts/identity_diff.py --help` when two test identities exist. It
+compares the same endpoint set across identities and flags same-shape /
+different-data responses on sensitive fields — the signature of IDOR, BOLA,
+and broken multi-tenancy. Credentials come from `VHS_IDA_*` / `VHS_IDB_*`
+env vars only. Every `data_diff` is a hypothesis requiring P4 validation;
+the tool never confirms findings by itself.
+
+## Stack-aware playbook prioritization (P3)
+
+Run `python3 scripts/playbook_prioritizer.py --run-dir <run-output>` after the
+recon/crawl stages to rank attack playbooks by stack evidence (httpx tech
+fingerprints + discovered URL patterns). Use the ranking to order P3 test
+design — highest-yield classes first. `dos`, `intranet-postexp`, and `mobile`
+are excluded from auto-ranking (gated/manual surfaces).
+
+## Role matrix (P3/P4)
+
+Use `scripts/role_matrix.py` for privilege-escalation coverage:
+plan mode builds a role×action matrix with expected outcomes
+(`--roles anon,user,admin --actions ... --out <engagement>/role-matrix.csv`);
+audit mode (`--matrix ... --test-matrix test-matrix.csv --enforce`) verifies
+every cell links to a finalized test and exits 1 while cells remain untested.
+Link each cell's `test_id` into `test-matrix.csv` so the P3/P4 gates see it.
+
+## Authenticated scanning & blind detection (scanner-safe)
+
+- `--auth-profile NAME` replays a session into katana/arjun/ffuf/nuclei/dalfox.
+  Credentials live only in `VHS_AUTH_<NAME>_COOKIE` or
+  `VHS_AUTH_<NAME>_BEARER` env vars — never in argv, manifests, or logs. Use
+  it together with `identity_diff.py` for IDOR/authz coverage.
+- `--enable-oast` turns Nuclei OAST back on when the program permits OOB
+  testing (add `oast` to `allowed_methods`); blind SQLi workflows use
+  `VHS_SQLMAP_PRESET=blind` with `--dns-domain=<collaborator>`.
+
+## Infra & takeover lead generation (active-safe+)
+
+The orchestrator runs three extra stages automatically (all outputs are
+hypotheses, never confirmed findings):
+
+```bash
+# fingerprint -> CVE/KEV correlation (httpx tech + naabu banners), KEV-first
+python3 <skill-dir>/scripts/fingerprint_cve.py ./engagement --run-dir ./run-output --append-hypotheses
+
+# dangling-CNAME subdomain-takeover screening (DNS-only; never claims)
+python3 <skill-dir>/scripts/takeover_check.py ./engagement --run-dir ./run-output --append-hypotheses
+
+# CORS reflection + missing security headers (GET-only)
+python3 <skill-dir>/scripts/header_probe.py ./engagement --run-dir ./run-output --append-hypotheses
+```
+
+`references/non-qualifying.md` is a DEFAULT template — the program's own policy
+(scope_source at P0) always overrides it; check it before discarding takeover
+or blind-SSRF findings.
+
+## Race-condition testing (P4, explicit opt-in)
+
+`scripts/race_probe.py` sends one bounded burst (≤50 requests) per invocation
+in `barrier` (parallel connections) or `pipeline` (HTTP/1.1 last-byte sync)
+mode. Requires `race_testing` in `allowed_methods`; state-changing methods
+additionally require `--allow-state-change` and the method's own permission
+entry. See `attack-playbooks/race-conditions.md` §3.2 for the single-packet
+methodology.
+
+## Zero-finding persistence protocol
+
+Load `references/persistence-protocol.md` whenever an engagement trends toward
+a zero-finding conclusion. Declaring "0 findings" requires documented
+exhaustion: ≥10 finalized tests, ≥2 distinct executed playbooks, and a
+`coverage-exhaustion.md` documenting tested avenues, blocked routes, and closed
+hypotheses. The P5 and P6 gates enforce this automatically — a single scanner
+pass with no manual hypothesis work will fail the gate.
+
 ## Critical review loop
 
 Load `references/critical-review-loop.md` only for P3–P5 hypothesis, validation,
@@ -415,12 +491,13 @@ full descriptions into every engagement.
   matching subsection through `references/context-router.md`.
 - `references/bountyforge-cvss.md` — CVSS 3.1 vector string scoring guide
   (AV/AC/PR/UI/S/C/I/A), ported from BountyForge (P5).
-- `references/attack-playbooks/` — 19 per-vuln-class black-box hunting playbooks
+- `references/attack-playbooks/` — 20 per-vuln-class black-box hunting playbooks
   + `00-index.md` (priority ordering). Dedicated files: `unauth-access`, `rce`,
   `file-upload`, `path-traversal`, `info-disclosure`, `logic-flaws`,
-  `arbitrary-x-authz`, `oauth-saml-jwt`, `sqli`, `ssrf-cache-host`, `api-rest`,
-  `graphql`, `race-conditions`, `xss`, `http-smuggling`, `mobile`,
-  `llm-prompt-injection`, `dos`, `intranet-postexp`. Cross-cutting classes are
+  `arbitrary-x-authz`, `oauth-saml-jwt`, `sqli`, `ssrf-cache-host`,
+  `subdomain-takeover`, `api-rest`, `graphql`, `race-conditions`, `xss`,
+  `http-smuggling`, `mobile`, `llm-prompt-injection`, `dos`,
+  `intranet-postexp`. Cross-cutting classes are
   folded into these (SSTI → `rce`/`ssrf-cache-host`; XXE → `rce`/`api-rest`/
   `oauth-saml-jwt`; CSRF → `logic-flaws`/`api-rest`/`xss`). Each playbook:
   entry-point frequency, probe techniques, bypass matrix, exploit/privesc

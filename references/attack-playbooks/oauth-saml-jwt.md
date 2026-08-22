@@ -77,6 +77,26 @@ SRC 价值：能伪造任意用户身份 = P0；能让回调把 code 发到攻�
 3. 受害者绑定到攻击者账号
 ```
 
+### 3.2b PKCE 绕过与 code 处理攻击（PKCE 开启≠安全）
+
+```
+1. 降级（downgrade）：
+   - 拦截授权请求，删除 code_challenge 参数重放——服务端若不强制 → PKCE 失效
+   - response_type=code→token 切换（隐式流绕过 code 保护，遗留端点常见）
+2. verifier 复用：
+   - 同一 code+verifier 兑换两次；第二次 200 = 服务端未消费 code/verifier 一次性
+3. code 注入（cross-client）：
+   - 用攻击者 client_id 发起授权拿 code，把 code 注入受害者的回调消费端点
+   - 受害端点若不校验 code 属于哪个 client → 用受害者会话兑换攻击者 code
+   - 反向：受害者 code 被攻击者 client 兑换（需 client 信任链缺陷）
+4. response_type=none 信息泄漏：
+   - /authorize?response_type=none&client_id=... → 观察 302 是否泄漏
+     email/uid 参数（登录态枚举 / 账号确认）
+5. code 无绑定：
+   - code 出现在 Referer / 日志 / 邮件链接 → 二次兑换窗口内重放
+证据：每次测试记录 code/verifier/challenge 三元组与兑换响应（脱敏 token 前后 8 位）。
+```
+
 ### 3.3 PKCE 缺失（移动 / SPA）
 
 ```

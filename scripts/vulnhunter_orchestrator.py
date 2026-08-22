@@ -13,6 +13,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import tempfile
 import shutil
 import subprocess
@@ -102,8 +103,9 @@ def crawl4ai_launcher_available(script: Path) -> bool:
     return script.exists() and os.access(script, os.X_OK) and interpreter.is_file() and os.access(interpreter, os.X_OK)
 
 
-def redact_command(cmd: list[str]) -> list[str]:
-    sensitive_flags = {"-h", "--header", "-cookie", "--cookie", "-token", "--token", "--api-key"}
+def redact_command(cmd: list[str], secrets: Iterable[str] = ()) -> list[str]:
+    sensitive_flags = {"-h", "--header", "-cookie", "--cookie", "-token", "--token", "--api-key", "-b"}
+    secret_values = [str(item) for item in secrets if str(item)]
     result: list[str] = []
     redact_next = False
     for part in cmd:
@@ -111,9 +113,63 @@ def redact_command(cmd: list[str]) -> list[str]:
             result.append("<redacted>")
             redact_next = False
         else:
-            result.append(part)
+            value = str(part)
+            for secret in secret_values:
+                if secret in value:
+                    value = value.replace(secret, "<redacted>")
+            result.append(value)
             redact_next = part.lower() in sensitive_flags
     return result
+
+
+def mask_secrets(text: str, secrets: Iterable[str]) -> str:
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret, "<redacted>")
+    return text
+
+
+def load_auth_profile(name: str) -> tuple[list[tuple[str, str]], list[str]]:
+    """Load a named session profile from VHS_AUTH_<NAME>_COOKIE / _BEARER env vars.
+
+    Credentials live only in the environment: never in argv, run configs,
+    manifests, or step logs. Returns (headers, secrets) where headers are
+    (name, value) pairs for injection into active tools.
+    """
+    prefix = "VHS_AUTH_" + re.sub(r"[^A-Za-z0-9]", "_", name).upper() + "_"
+    cookie = os.environ.get(prefix + "COOKIE", "").strip()
+    bearer = os.environ.get(prefix + "BEARER", "").strip()
+    if not cookie and not bearer:
+        raise PolicyError(
+            f"auth profile {name!r} requires {prefix}COOKIE or {prefix}BEARER in the environment"
+        )
+    headers: list[tuple[str, str]] = []
+    secrets: list[str] = []
+    if cookie:
+        headers.append(("Cookie", cookie))
+        secrets.append(cookie)
+    if bearer:
+        token = f"Bearer {bearer}"
+        headers.append(("Authorization", token))
+        secrets.extend([bearer, token])
+    return headers, secrets
+
+
+def auth_header_args(ctx: dict) -> list[str]:
+    """Return flat -H args for tools that accept repeatable headers."""
+    args: list[str] = []
+    for name, value in ctx.get("auth_headers") or []:
+        args.extend(["-H", f"{name}: {value}"])
+    return args
+
+
+def auth_arjun_args(ctx: dict) -> list[str]:
+    """Return arjun --headers args for the session profile, if any."""
+    headers = ctx.get("auth_headers") or []
+    if not headers:
+        return []
+    joined = "\\n".join(f"{name}: {value}" for name, value in headers)
+    return ["--headers", joined]
 
 
 def research_header_args(ctx: dict) -> list[str]:
@@ -129,6 +185,7 @@ def run_command(
     *,
     timeout: int,
     output: Path | None = None,
+    secrets: Iterable[str] = (),
 ) -> Step:
     start = time.monotonic()
     output_handle = None
@@ -150,6 +207,7 @@ def run_command(
         note = "\n".join(stderr.splitlines()[-30:])[-2000:].strip()
         if not output and proc.stdout:
             note = (proc.stdout.decode("utf-8", "replace") + "\n" + note).strip()[-2000:]
+        note = mask_secrets(note, secrets)
     except subprocess.TimeoutExpired:
         status, note = "timeout", f"exceeded {timeout}s"
     except OSError as exc:
@@ -164,7 +222,7 @@ def run_command(
         seconds=time.monotonic() - start,
         output=str(output) if output else "",
         note=note,
-        command=redact_command(cmd),
+        command=redact_command(cmd, secrets),
     )
 
 
@@ -343,10 +401,38 @@ def active_recon(ctx: dict) -> list[Step]:
         atomic_write(live_scoped, "")
     if ctx["ports"] and command_exists("naabu") and resolved.exists() and resolved.stat().st_size:
         command = [
-            "naabu", "-list", str(resolved), "-silent", "-top-ports", "100", "-rate", str(ctx["rate_ports"])
+            "naabu", "-list", str(resolved), "-silent",
+            "-top-ports", {"top1000": "1000", "full": "1000"}.get(ctx["port_set"], "100"),
+            "-rate", str(ctx["rate_ports"]),
         ]
         steps.append(run_command("recon", "naabu", command, timeout=ctx["agent_timeout"], output=directory / "ports.txt"))
     return steps
+
+
+def fingerprint_stage(ctx: dict) -> list[Step]:
+    """Local-only fingerprint -> CVE/KEV correlation over collected recon artifacts."""
+    script = Path(__file__).parent / "fingerprint_cve.py"
+    out = ctx["out"]
+    if not script.exists() or not ctx.get("engagement_root"):
+        return [Step("recon", "fingerprint-cve", "skipped", 0, "", "script or engagement root unavailable")]
+    report = out / "cve-hypotheses.csv"
+    command = [sys.executable, str(script), str(ctx["engagement_root"]), "--run-dir", str(out)]
+    step = run_command("recon", "fingerprint-cve", command, timeout=180)
+    step.output = str(report)
+    return [step]
+
+
+def takeover_stage(ctx: dict) -> list[Step]:
+    """DNS-only dangling-CNAME takeover screening (never claims resources)."""
+    script = Path(__file__).parent / "takeover_check.py"
+    out = ctx["out"]
+    if not script.exists() or not ctx.get("engagement_root"):
+        return [Step("recon", "takeover-check", "skipped", 0, "", "script or engagement root unavailable")]
+    report = out / "takeover-candidates.csv"
+    command = [sys.executable, str(script), str(ctx["engagement_root"]), "--run-dir", str(out)]
+    step = run_command("recon", "takeover-check", command, timeout=600)
+    step.output = str(report)
+    return [step]
 
 
 def passive_crawl(ctx: dict) -> list[Step]:
@@ -385,8 +471,8 @@ def active_crawl(ctx: dict) -> list[Step]:
         command = [
             "katana", "-list", str(live), "-silent", "-jc", "-kf", "all", "-d", "3",
             "-rl", str(ctx["rate_http"]),
-        ] + research_header_args(ctx)
-        steps.append(run_command("crawl", "katana", command, timeout=ctx["agent_timeout"], output=output))
+        ] + research_header_args(ctx) + auth_header_args(ctx)
+        steps.append(run_command("crawl", "katana", command, timeout=ctx["agent_timeout"], output=output, secrets=ctx.get("auth_secrets") or []))
         sources.append(output)
     # Scrapling stealth fetch (live JS/anti-bot pages that plain HTTP misses).
     if live.exists() and live.stat().st_size:
@@ -436,7 +522,39 @@ def active_crawl(ctx: dict) -> list[Step]:
                 api.append(line)
     atomic_write(directory / "javascript_urls.txt", "".join(f"{x}\n" for x in sorted(set(javascript))))
     atomic_write(directory / "api_candidates.txt", "".join(f"{x}\n" for x in sorted(set(api))))
+    # jsluice deep-parse: extract hidden endpoints + secrets from JS bundles.
+    if command_exists("jsluice") and javascript:
+        js_script = Path(__file__).parent / "js_deep_parse.py"
+        js_out = out / "agents" / "jsanalysis"
+        js_command = [
+            sys.executable, str(js_script),
+            "--engagement", str(ctx["engagement_root"]),
+            "--input", str(directory / "javascript_urls.txt"),
+            "--outdir", str(js_out),
+            "--max-files", str(ctx.get("max_js_files", 50)),
+        ]
+        js_command.extend(research_header_args(ctx))
+        steps.append(run_command(
+            "crawl", "jsluice-deep-parse", js_command,
+            timeout=max(300, ctx["agent_timeout"]),
+        ))
     return steps
+
+
+def header_probe_stage(ctx: dict) -> list[Step]:
+    """GET-only CORS-reflection and security-header probe over live URLs."""
+    script = Path(__file__).parent / "header_probe.py"
+    out = ctx["out"]
+    if not script.exists() or not ctx.get("engagement_root"):
+        return [Step("scan", "header-probe", "skipped", 0, "", "script or engagement root unavailable")]
+    report = out / "header-probe.csv"
+    command = [
+        sys.executable, str(script), str(ctx["engagement_root"]),
+        "--run-dir", str(out), "--max-hosts", str(ctx["max_hosts"]),
+    ]
+    step = run_command("scan", "header-probe", command, timeout=ctx["agent_timeout"])
+    step.output = str(report)
+    return [step]
 
 
 def normalize_discovery(ctx: dict) -> list[Step]:
@@ -464,26 +582,79 @@ def active_discovery(ctx: dict) -> list[Step]:
     live = out / "agents" / "recon" / "live_urls.txt"
     steps: list[Step] = []
     targets = live.read_text(encoding="utf-8", errors="ignore").splitlines()[: ctx["max_hosts"]] if live.exists() else []
+    # Merge JS-derived paths into the fuzz wordlist: endpoints referenced in JS
+    # bundles are the highest-yield content-discovery candidates.
+    wordlist: Path | None = ctx["wordlist"]
+    js_paths = out / "agents" / "jsanalysis" / "js_extracted_urls_scoped.txt"
+    if wordlist and js_paths.exists():
+        entries: set[str] = set()
+        for source in (wordlist, js_paths):
+            for line in source.read_text(encoding="utf-8", errors="ignore").splitlines():
+                path = urlsplit(line.strip()).path.lstrip("/")
+                value = path or line.strip()
+                if value and "/" not in value.rstrip("/") and not value.startswith("#"):
+                    entries.add(value.rstrip("/"))
+        if entries:
+            merged = directory / "ffuf_words_merged.txt"
+            atomic_write(merged, "".join(f"{value}\n" for value in sorted(entries)))
+            wordlist = merged
+            steps.append(Step("discovery", "wordlist-merge", "ok", 0, str(merged), f"{len(entries)} unique entries (wordlist + JS paths)"))
     if command_exists("arjun") and targets:
         limited = directory / "arjun_targets.txt"
         atomic_write(limited, "".join(f"{url}\n" for url in targets))
         output = directory / "arjun.json"
-        command = ["arjun", "-i", str(limited), "-oJ", str(output), "--rate-limit", str(max(1, ctx["rate_discovery"]))]
-        step = run_command("discovery", "arjun", command, timeout=ctx["agent_timeout"])
+        command = ["arjun", "-i", str(limited), "-oJ", str(output), "--rate-limit", str(max(1, ctx["rate_discovery"]))] + auth_arjun_args(ctx)
+        step = run_command("discovery", "arjun", command, timeout=ctx["agent_timeout"], secrets=ctx.get("auth_secrets") or [])
         step.output = str(output)
         steps.append(step)
-    if command_exists("ffuf") and ctx["wordlist"] and targets:
+    if command_exists("ffuf") and wordlist and targets:
+        auth_args = auth_header_args(ctx)
+        extension_args = ["-e", ctx["extensions"]] if ctx.get("extensions") else []
+        ffuf_jobs: list[tuple[int, str, Path, list[str]]] = []
         for index, url in enumerate(targets, 1):
             identifier = hashlib.sha256(url.encode()).hexdigest()[:12]
             output = directory / f"ffuf_{identifier}.json"
             command = [
-                "ffuf", "-u", url.rstrip("/") + "/FUZZ", "-w", str(ctx["wordlist"]), "-ac",
+                "ffuf", "-u", url.rstrip("/") + "/FUZZ", "-w", str(wordlist), "-ac",
                 "-t", "10", "-rate", str(ctx["rate_discovery"]), "-timeout", str(ctx["timeout"]),
+                "-recursion", "-recursion-depth", "2",
                 "-of", "json", "-o", str(output),
-            ]
-            step = run_command("discovery", f"ffuf[{index}]", command, timeout=ctx["agent_timeout"])
-            step.output = str(output)
-            steps.append(step)
+            ] + extension_args + auth_args
+            ffuf_jobs.append((index, url, output, command))
+        workers = max(1, int(ctx.get("discovery_workers", 4)))
+        if workers > 1 and len(ffuf_jobs) > 1:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {
+                    executor.submit(
+                        run_command, "discovery", f"ffuf[{index}]", command,
+                        timeout=ctx["agent_timeout"], secrets=ctx.get("auth_secrets") or [],
+                    ): (index, output)
+                    for index, _, output, command in ffuf_jobs
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    index, output = futures[future]
+                    step = future.result()
+                    step.output = str(output)
+                    steps.append(step)
+        else:
+            for index, url, output, command in ffuf_jobs:
+                step = run_command("discovery", f"ffuf[{index}]", command, timeout=ctx["agent_timeout"], secrets=ctx.get("auth_secrets") or [])
+                step.output = str(output)
+                steps.append(step)
+    if command_exists("ffuf") and ctx.get("vhost") and ctx["wordlist"]:
+        # Virtual-host enumeration against the apex host: FUZZ substitutes the
+        # subdomain label in the Host header while the connection stays on the
+        # resolved apex IP.
+        apex = ctx["target"]
+        url = f"https://{apex}"
+        if policy.url_allowed(url):
+            output = directory / "ffuf_vhost.json"
+            command = [
+                "ffuf", "-u", url, "-w", str(ctx["wordlist"]), "-H", f"Host: FUZZ.{apex}",
+                "-ac", "-t", "10", "-rate", str(ctx["rate_discovery"]), "-timeout", str(ctx["timeout"]),
+                "-of", "json", "-o", str(output),
+            ] + auth_header_args(ctx)
+            steps.append(run_command("discovery", "ffuf-vhost", command, timeout=ctx["agent_timeout"], secrets=ctx.get("auth_secrets") or []))
     output = directory / "urls_discovered.txt"
     count = collect_discovery_urls(directory, policy, output)
     steps.append(Step("discovery", "scope-guard-discovered-urls", "ok", 0, str(output), f"{count} URL(s) allowed"))
@@ -507,16 +678,23 @@ def capture_baselines(ctx: dict) -> list[Step]:
             continue
         temp = output.parent / ("baseline-" + hashlib.sha256(origin.encode()).hexdigest()[:12] + ".txt")
         command = [
-            "curl", "-sS", "-o", "/dev/null", "-w", "%{http_code} %{size_download}",
+            "curl", "-sS", "-o", str(temp), "-w", "%{http_code} %{size_download}",
             "--max-time", str(ctx["timeout"]), "--max-redirs", "0",
         ] + research_header_args(ctx) + [probe_url]
-        step = run_command("recon", "soft404-baseline", command, timeout=ctx["timeout"] + 5, output=temp)
+        step = run_command("recon", "soft404-baseline", command, timeout=ctx["timeout"] + 5)
         step.output = str(output)
         step.note = (f"origin={origin}; " + step.note).strip()
         steps.append(step)
         try:
-            status, size = temp.read_text(encoding="utf-8").strip().split()
-            baselines[origin] = {"status": status, "size": int(float(size)), "probe_url": probe_url}
+            meta = temp.read_text(encoding="utf-8", errors="ignore").strip()
+            status, size = meta.split()
+            head_bytes = temp.read_bytes()[:2048]
+            baselines[origin] = {
+                "status": status,
+                "size": int(float(size)),
+                "probe_url": probe_url,
+                "head_sha256_12": hashlib.sha256(head_bytes).hexdigest()[:12],
+            }
         except (OSError, ValueError):
             pass
         temp.unlink(missing_ok=True)
@@ -535,14 +713,17 @@ def nuclei_scan(ctx: dict) -> list[Step]:
     limited = directory / "nuclei_targets.txt"
     atomic_write(limited, "".join(f"{url}\n" for url in targets))
     output = directory / "nuclei.jsonl"
+    severity = ctx["severity"]
+    if ctx.get("include_medium") and "medium" not in severity:
+        severity = f"{severity},medium"
     command = [
-        "nuclei", "-l", str(limited), "-severity", ctx["severity"], "-etags", "dos,fuzz",
+        "nuclei", "-l", str(limited), "-severity", severity, "-etags", "dos,fuzz",
         "-retries", "1", "-rl", str(ctx["rate_scan"]), "-bulk-size", "10", "-concurrency", "10",
         "-jsonl", "-o", str(output),
-    ]
+    ] + auth_header_args(ctx)
     if not ctx["enable_oast"]:
         command.append("-ni")
-    step = run_command("scan", "nuclei", command, timeout=ctx["agent_timeout"])
+    step = run_command("scan", "nuclei", command, timeout=ctx["agent_timeout"], secrets=ctx.get("auth_secrets") or [])
     step.output = str(output)
     return [step]
 
@@ -570,8 +751,8 @@ def dalfox_scan(ctx: dict) -> list[Step]:
     command = [
         "dalfox", "file", str(candidates), "--silence", "--only-poc", "--worker", "5",
         "--output", str(output),
-    ]
-    step = run_command("scan", "dalfox", command, timeout=ctx["agent_timeout"])
+    ] + auth_header_args(ctx)
+    step = run_command("scan", "dalfox", command, timeout=ctx["agent_timeout"], secrets=ctx.get("auth_secrets") or [])
     step.output = str(output)
     return [step]
 
@@ -649,7 +830,7 @@ def config_fingerprint(ctx: dict) -> str:
     stable = {
         key: str(value) if isinstance(value, Path) else value
         for key, value in ctx.items()
-        if key not in {"out", "started", "policy", "engagement", "state", "resume"}
+        if key not in {"out", "started", "policy", "engagement", "state", "resume", "auth_headers", "auth_secrets"}
     }
     return hashlib.sha256(json.dumps(stable, sort_keys=True).encode()).hexdigest()
 
@@ -767,9 +948,20 @@ def main() -> int:
     parser.add_argument("--wordlist", type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--parallel", action="store_true", help="run discovery and nuclei concurrently; Dalfox waits for discovery")
+    parser.add_argument("--discovery-workers", type=int, default=4, help="concurrent ffuf jobs across targets (with --parallel)")
     parser.add_argument("--ports", action="store_true", help="requires explicit port_scan permission in engagement.json")
+    parser.add_argument(
+        "--port-set", choices=("top100", "top1000"), default="top100",
+        help="naabu port breadth when --ports is enabled (top1000 finds more infra services)",
+    )
+    parser.add_argument("--vhost", action="store_true", help="enumerate virtual hosts (Host-header FUZZ against the apex)")
+    parser.add_argument(
+        "--extensions", default="",
+        help="comma-separated extension list appended to ffuf paths, e.g. 'php,html,asp,jsp'",
+    )
     parser.add_argument("--resume", action="store_true", help="reuse completed stage checkpoints in an existing --out directory")
-    parser.add_argument("--max-hosts", type=int, default=15)
+    parser.add_argument("--max-hosts", type=int, default=30)
+    parser.add_argument("--max-js-files", type=int, default=150)
     parser.add_argument("--timeout", type=int, default=10)
     parser.add_argument("--agent-timeout", type=int, default=300)
     parser.add_argument("--rate-http", type=int, default=25)
@@ -777,10 +969,16 @@ def main() -> int:
     parser.add_argument("--rate-scan", type=int, default=20)
     parser.add_argument("--rate-ports", type=int, default=50)
     parser.add_argument("--severity", default="critical,high")
+    parser.add_argument("--include-medium", action="store_true", help="add medium severity to nuclei scan (chaining material)")
     parser.add_argument("--enable-oast", action="store_true", help="explicitly enable Nuclei OAST/Interactsh coverage")
     parser.add_argument(
         "--research-header",
         help="explicit request header required by an authorized program, e.g. 'X-HackerOne-Research: username'",
+    )
+    parser.add_argument(
+        "--auth-profile",
+        help="named session profile injected into katana/arjun/ffuf/nuclei/dalfox; credentials come from "
+        "VHS_AUTH_<NAME>_COOKIE or VHS_AUTH_<NAME>_BEARER env vars and never enter argv or logs",
     )
     args = parser.parse_args()
 
@@ -802,6 +1000,7 @@ def main() -> int:
 
     engagement = state = None
     policy: ScopePolicy
+    engagement_root: Path = args.engagement if args.engagement else Path()
     if profile == "plan-only":
         policy = ScopePolicy([args.target])
     else:
@@ -827,6 +1026,15 @@ def main() -> int:
             parser.error(str(exc))
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    auth_headers: list[tuple[str, str]] = []
+    auth_secrets: list[str] = []
+    if args.auth_profile:
+        if profile in {"plan-only", "passive-osint"}:
+            parser.error("--auth-profile requires an active profile (active-safe or scanner-safe)")
+        try:
+            auth_headers, auth_secrets = load_auth_profile(args.auth_profile)
+        except PolicyError as exc:
+            parser.error(str(exc))
     out = args.out.expanduser().resolve() if args.out else Path.cwd() / "vulnhunter-runs" / args.target / timestamp
     if args.resume and not out.is_dir():
         parser.error("--resume --out directory does not exist")
@@ -843,7 +1051,10 @@ def main() -> int:
         "policy": policy,
         "engagement": engagement,
         "state": state,
+        "engagement_root": engagement_root if profile != "plan-only" else None,
         "started": utc_now(),
+        "auth_headers": auth_headers,
+        "auth_secrets": auth_secrets,
     }
     ctx["authorization_fingerprint"] = authorization_fingerprint(
         engagement or {}, state or {}, args.scope
@@ -878,7 +1089,10 @@ def main() -> int:
                 steps.extend(stage(ctx, "20-passive-crawl", passive_crawl))
                 if PROFILE_RANK[profile] >= PROFILE_RANK["active-safe"]:
                     steps.extend(stage(ctx, "30-active-recon", active_recon))
+                    steps.extend(stage(ctx, "35-fingerprint-cve", fingerprint_stage))
+                    steps.extend(stage(ctx, "38-takeover-check", takeover_stage))
                     steps.extend(stage(ctx, "40-active-crawl", active_crawl))
+                    steps.extend(stage(ctx, "45-header-probe", header_probe_stage))
                     steps.extend(stage(ctx, "50-normalize", normalize_discovery))
                 else:
                     # Passive profile still creates normalized, scope-filtered artifacts offline.

@@ -149,6 +149,45 @@ mutation {
 }
 ```
 
+### 3.6b 字段建议枚举（field suggestions）
+
+```
+# 输错字段名，服务端返回"Did you mean ...?"——逐字母逼近隐藏字段/内部 Mutation
+query { users { emial } }   → "Did you mean 'email'?"
+query { internalUsers }     → 建议出 internalUsers / adminUsers 等未文档化字段
+工具： Clairvoyance（自动字典逼近还原全 schema，即使 introspection 关闭）
+```
+
+### 3.6c Persisted Queries 与操作白名单绕过
+
+```
+# APQ / persisted query 端点把 query 换成 hash：
+POST /graphql {"query":"query hash", "extensions":{"persistedQuery":{"sha256Hash":"<h>"}}"}
+绕过思路：
+1. 白名单只校验 hash 不校验 variables → 白名单 Mutation + 越权 variables
+2. 注册接口可写（registerPersistedQuery）→ 任意注册新"已批准"操作
+3. 服务端回退到明文 query（hash 未命中时）→ 直接发未授权明文操作
+```
+
+### 3.6d 批量 Mutation / 别名作为竞态原语
+
+```
+# 同一 Mutation 别名 ×N 一次提交：后端逐个执行但共享同一校验窗口
+mutation {
+  a: redeemCoupon(code:"X")  b: redeemCoupon(code:"X")  c: redeemCoupon(code:"X")
+}
+# 限购/一次性资源类接口 → 与 race-conditions.md 单包竞态同源，先试这里（更便宜）
+配合 scripts/race_probe.py --mode pipeline 做 HTTP 层对照。
+```
+
+### 3.6e Subscription / WebSocket 面
+
+```
+1. ws(s):// 端点是否复用 HTTP 鉴权？未鉴权订阅 = 实时数据泄漏
+2. subscription 回调参数注入（若服务端把参数写入内部客户端）
+3. GraphQL over WebSocket 的 event 编号可否跨用户订阅（订阅他人频道 id）
+```
+
 ### 3.7 CSRF on GraphQL
 
 ```

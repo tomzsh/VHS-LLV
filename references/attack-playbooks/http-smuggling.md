@@ -720,7 +720,7 @@ Transfer-encoding: cow",  # 两个TE
     " Transfer-Encoding: chunked",     # 行首空格
     "X: x
 Transfer-Encoding: chunked",  # Header注入
-    "Transfer-Encoding: chunked ",  # 空字节
+    "Transfer-Encoding: chunked\x00",  # 空字节
 ]
 
 for i, te in enumerate(te_variants):
